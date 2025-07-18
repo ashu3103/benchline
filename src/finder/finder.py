@@ -1,13 +1,11 @@
-import os
-from pathlib import Path
-from typing import List
-
 """
     The finder package will take a go project directory, detect all the test files (unit + benchmark)
     and return a list of paths to the test path
         - Check the standard test subdirectories like - ('test/' or 'tests/')
         - If no such subdirectory is found, perform a DFS over the whole project directory
 """
+import os
+from typing import List
 
 _EXCLUDED_DIRS = {"vendor", "testdata", ".git", "third_party", "node_modules", "bin", "out"}
 _STANDARD_TEST_DIRS = ['test', 'tests']

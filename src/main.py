@@ -1,5 +1,6 @@
 import logging
 import atexit
+import finder
 from typing import List
 
 def usage():
@@ -28,6 +29,11 @@ def initLogger():
 logger = initLogger()
 # Register a clean logging shutdown
 atexit.register(logging.shutdown)
+
+## Find the test files
+def findTestFilesWrapper(root: str) -> List[str]:
+    return finder.findTestFiles(root)
+
 
 
 

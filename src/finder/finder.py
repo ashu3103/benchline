@@ -1,8 +1,13 @@
 """
-    The finder package will take a go project directory, detect all the test files (unit + benchmark)
-    and return a list of paths to the test path
-        - Check the standard test subdirectories like - ('test/' or 'tests/')
-        - If no such subdirectory is found, perform a DFS over the whole project directory
+    The **finder** package will take a go project directory, detect all the test files and return 
+    a list of paths to the test path
+
+    This will first check the standard test subdirectories like - ('test/' or 'tests/') and if no
+    such subdirectory is found, perform a DFS over the whole project directory to find test files
+    (typically the files ending with '_test.go')
+
+    Additionally we can exclude the directories which can contain static (large) data (think about 
+    media files)
 """
 import os
 from typing import List
@@ -16,6 +21,10 @@ def _isDirectory(path: str) -> bool:
 def _isExcluded(dirname: str) -> bool:
     return dirname in _EXCLUDED_DIRS
 
+def _isGoTestFile(filename: str) -> bool:
+    # TODO: Check if the file is valid (optional)
+    return filename.endswith('_test.go')
+
 def _doFindTestFiles(root: str) -> List[str]:
     test_files = []
     for dirpath, dirnames, filenames in os.walk(root):
@@ -24,7 +33,7 @@ def _doFindTestFiles(root: str) -> List[str]:
 
         for filename in filenames:
             ## Check if a Go test file
-            if filename.endswith('_test.go'):
+            if _isGoTestFile(filename):
                 full_path = os.path.abspath(os.path.join(dirpath, filename))
                 test_files.append(full_path)
 

@@ -2,6 +2,7 @@ import logging
 import atexit
 import finder
 import injector
+import runner
 from typing import List
 
 def usage():
@@ -35,9 +36,13 @@ atexit.register(logging.shutdown)
 def findTestFilesWrapper(root: str) -> List[str]:
     return finder.findTestFiles(root)
 
+## Inject Benchmark Code
 def injectBenchmarkCodeWrapper(file: str) -> int:
     return injector.processFile(file)
 
+def runBenchmarkTestWrapper(project_directory: str, log_file: str) -> int:
+    return runner.runBenchmarkTests(project_directory, log_file)
 
+runBenchmarkTestWrapper("/home/ashu3103/Desktop/go_tmp/heapdemo", "/home/ashu3103/Desktop/benchline/src/log.txt")
 
 

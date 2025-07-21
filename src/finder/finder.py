@@ -10,7 +10,10 @@
     media files)
 """
 import os
+import logging
 from typing import List
+
+logger = logging.getLogger('benchline')
 
 _EXCLUDED_DIRS = {"vendor", "testdata", ".git", "third_party", "node_modules", "bin", "out"}
 _STANDARD_TEST_DIRS = ['test', 'tests']
@@ -34,6 +37,7 @@ def _doFindTestFiles(root: str) -> List[str]:
         for filename in filenames:
             ## Check if a Go test file
             if _isGoTestFile(filename):
+                logger.debug(f'[Finder] go test file detected: {filename}')
                 full_path = os.path.abspath(os.path.join(dirpath, filename))
                 test_files.append(full_path)
 
@@ -42,7 +46,8 @@ def _doFindTestFiles(root: str) -> List[str]:
 
 def findTestFiles(root: str) -> List[str]:
     if not _isDirectory(root):
-        raise ValueError(f'{root} is not a valid directory')
+        logger.error(f'[Finder] {root} is not a valid directory')
+        return []
 
     ## Check for standard test directories
     for test_dir in _STANDARD_TEST_DIRS:

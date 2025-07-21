@@ -1,0 +1,9 @@
+goos: linux
+goarch: amd64
+pkg: heapdemo
+cpu: AMD Ryzen 5 5625U with Radeon Graphics         
+BenchmarkNoAlloc-12     	47152560	        21.35 ns/op	       8 B/op	       1 allocs/op
+BenchmarkOneAlloc-12    	12248908	        93.16 ns/op	      56 B/op	       3 allocs/op
+BenchmarkTwoAlloc-12    	24505040	        48.45 ns/op	     112 B/op	       1 allocs/op
+PASS
+ok  	heapdemo	3.496s

@@ -16,6 +16,7 @@ limitations under the License.
 
 package main
 
+import _ "time"
 import (
 	"fmt"
 	"reflect"
@@ -37,7 +38,9 @@ func BenchmarkConformance(t *testing.B) {
 					code: `package test
 		
 			var num = 3
-			func Helper(x int) { return x / 0 }
+		func Helper(x int) { return x / 0 }
+	var _ = Describe("Feature", func() {
+
 			/*
 			   Testname: Kubelet-OutputToLogs
 			   Description: By default the stdout and stderr from the process
@@ -132,6 +135,6 @@ func BenchmarkConformance(t *testing.B) {
 							tc.code, cd, tc.output)
 					}
 				})
-	}
+			}
 	}
 }

@@ -13,7 +13,7 @@ import os
 import re
 import subprocess
 import logging
-from typing import TextIO
+from typing import TextIO, Callable, List
 
 logger = logging.getLogger(__name__)
 
@@ -21,6 +21,8 @@ logger = logging.getLogger(__name__)
 
 _UT_FUNCTION_SCOPE = 0
 _UT_TEST_ARG_VARIABLE_NAME = None
+
+_CALLBACK_SCHEDULER: List[Callable[[str], None]] = []
 
 ## Tokens
 CURLY_BRACE_OPEN  = '{'
@@ -38,6 +40,7 @@ BT_PARAMETER_TYPE_KEYWORD = '*testing.B'
 
 #### Regex Definitions ####
 
+IMPORT_KEYWORD_DETECTION_PATTERN     = r'^import\s+.*'
 FUNC_KEYWORD_DETECTION_PATTERN       = r'^func(?:\s+\S.*)?$'
 FUNC_TEST_NAME_DETECTION_PATTERN     = r'(?:^|\S\s+)Test\S+\s*\(.*$'
 FUNC_TEST_ARG_TYPE_DETECTION_PATTERN = r'\S+\s+\*testing\.T\s*[,)].*'
@@ -111,10 +114,75 @@ class Peekable:
             return self._peeked
         return next(self._iterator)
 
-
 #### Function Definitions ####
 
-def _extract
+def _triggerTimeImport(file: str):
+    with open(file, 'r') as f:
+        lines = f.readlines()
+    
+    lines = [line.replace('import _ "time"', 'import "time"') for line in lines]
+
+    with open(file, 'w') as f:
+        f.writelines(lines)
+
+def _handleDeadlineMethod(line: str) -> str:
+    global _CALLBACK_SCHEDULER
+
+    res = line.split('=')[0].split(':')[0]
+    a1 = res.split(',')[0].strip()
+    a2 = res.split(',')[1].strip()
+    res = f"var {a1} time.Time" + NEWLINE
+    if (a2 != '_'):
+        res = res + f"{a2} := false" + NEWLINE
+
+    _CALLBACK_SCHEDULER.append(_triggerTimeImport)
+    return res
+
+def _isDeadlineMethodPresent(line: str) -> bool:
+    global _UT_TEST_ARG_VARIABLE_NAME
+    return line.count(f"{_UT_TEST_ARG_VARIABLE_NAME}.Deadline()")
+
+def _isParallelMethodPresent(line: str) -> bool:
+    global _UT_TEST_ARG_VARIABLE_NAME
+    return line.count(f"{_UT_TEST_ARG_VARIABLE_NAME}.Parallel()")
+
+def _removeUnsupportedStatement(line: str):
+    ## Simply skip the Parallel() method of t
+    if (_isParallelMethodPresent(line)): 
+        return "", True
+    ## Handle Deadline() elegantly
+    if _isDeadlineMethodPresent(line):
+        return _handleDeadlineMethod(line), True
+    
+    return None, False
+
+def _processLine(line: str) -> str:
+    global _UT_FUNCTION_SCOPE
+    global _UT_TEST_ARG_VARIABLE_NAME
+
+    res = line[:]
+
+    if _UT_TEST_ARG_VARIABLE_NAME:
+        _UT_FUNCTION_SCOPE = _UT_FUNCTION_SCOPE + res.count(CURLY_BRACE_OPEN) - res.count(CURLY_BRACE_CLOSE)
+
+    ## This marks the ending of a unit test function
+    if (_UT_TEST_ARG_VARIABLE_NAME):
+        if (_UT_FUNCTION_SCOPE == 0):
+            res = f'\t{CURLY_BRACE_CLOSE}\n' + res
+            _UT_TEST_ARG_VARIABLE_NAME = None
+        else:
+            tmp_res, present = _removeUnsupportedStatement(line)
+            if (present and tmp_res != None):
+                return tmp_res
+            
+            if (res.count(UT_PARAMETER_TYPE_KEYWORD)):
+                res = res.replace(UT_PARAMETER_TYPE_KEYWORD, BT_PARAMETER_TYPE_KEYWORD)
+            res = "\t\t" + res
+    else:
+        if (re.search(IMPORT_KEYWORD_DETECTION_PATTERN, res)):
+            res = "import _ \"time\"" + NEWLINE + res
+
+    return res
 
 def _isValidLine(line: str) -> bool:
     if (line == ''): return False
@@ -138,11 +206,10 @@ def _handleFunctionBlockStartDetection(line: str, reader: TextIO, writer: TextIO
         output = output + line + NEWLINE
         _UT_FUNCTION_SCOPE = _UT_FUNCTION_SCOPE + 1
         writer.write(output)
-        return True
+        return output, True
     else:
         next_line = next(reader)
         output = output + line + NEWLINE
-        # writer.write(line + NEWLINE)
 
         processed_next_line = next_line[:].strip()
         ## find next valid line
@@ -155,10 +222,11 @@ def _handleFunctionBlockStartDetection(line: str, reader: TextIO, writer: TextIO
             # writer.write(processed_next_line)
             _UT_FUNCTION_SCOPE = _UT_FUNCTION_SCOPE + 1
             writer.write(output)
-            return True
+            return output, True
         
     _UT_TEST_ARG_VARIABLE_NAME = None
-    return False
+    output = output + next_line + NEWLINE
+    return output, False
 
 def _handleTestParameterDetection(line: str, reader: TextIO, writer: TextIO, output: str) -> bool:
     global _UT_TEST_ARG_VARIABLE_NAME
@@ -183,7 +251,8 @@ def _handleTestParameterDetection(line: str, reader: TextIO, writer: TextIO, out
             _UT_TEST_ARG_VARIABLE_NAME = _extractVariableName(processed_next_line)
             return _handleFunctionBlockStartDetection(processed_next_line, reader, writer, output)
 
-    return False
+    output = output + next_line + NEWLINE
+    return output, False
 
 def _handleTestFuncNameDetection(line: str, reader: TextIO, writer: TextIO, output: str) -> bool:
     ## Check if the current line has `TestXxx`` if not get the next valid line
@@ -205,7 +274,8 @@ def _handleTestFuncNameDetection(line: str, reader: TextIO, writer: TextIO, outp
             processed_next_line = processed_next_line.replace("Test", "Benchmark", 1)
             return _handleTestParameterDetection(processed_next_line, reader, writer, output)
 
-    return False
+    output = output + next_line + NEWLINE
+    return output, False
 
 def _detectUnitTestFunctionStatement(line: str, reader: TextIO, writer: TextIO) -> bool:
     processed_line = line[:].strip()
@@ -213,7 +283,9 @@ def _detectUnitTestFunctionStatement(line: str, reader: TextIO, writer: TextIO) 
 
     if (re.search(FUNC_KEYWORD_DETECTION_PATTERN, processed_line)):
         return _handleTestFuncNameDetection(processed_line, reader, writer, output)
-    return False
+    
+    output = output + line
+    return output, False
 
 # TODO: If the function like `_detectUnitTestFunctionStatement` can read next line, the lineno may not be
 # accuarte
@@ -224,32 +296,22 @@ def _injectBenchmarkCode(reader: TextIO, writer: TextIO) -> int:
     try:
         while True:
             line = next(reader)
+
+            output, present = _detectUnitTestFunctionStatement(line, reader, writer)
             ## Scan till the unit test (TestXxx) function is encountered
-            if (_detectUnitTestFunctionStatement(line, reader, writer)):
+            if (present):
                 logger.debug(f'unit test function detected')
                 ## variable name must be present
                 if not _UT_TEST_ARG_VARIABLE_NAME: 
                     return 1
                 writer.write(f'\tfor {_UT_TEST_ARG_VARIABLE_NAME}.Loop() {CURLY_BRACE_OPEN}\n')
             else:
-                if _UT_TEST_ARG_VARIABLE_NAME:
-                    if (line.count(UT_PARAMETER_TYPE_KEYWORD)):
-                        line = line.replace(UT_PARAMETER_TYPE_KEYWORD, BT_PARAMETER_TYPE_KEYWORD)
-                    _UT_FUNCTION_SCOPE = _UT_FUNCTION_SCOPE + line.count(CURLY_BRACE_OPEN) - line.count(CURLY_BRACE_CLOSE)
-
-                ## This marks the ending of a unit test function
-                if (_UT_TEST_ARG_VARIABLE_NAME and _UT_FUNCTION_SCOPE == 0):
-                    writer.write(f'\t{CURLY_BRACE_CLOSE}\n')
-                    _UT_TEST_ARG_VARIABLE_NAME = None
-
-                if (_UT_TEST_ARG_VARIABLE_NAME):
-                    ## TODO: Skip some statements which are not relevnt in benchmark tests
-                    writer.write(f'\t\t{line}')
-                else:
-                    writer.write(line)
+                result = _processLine(output)
+                writer.write(result)
 
     except StopIteration:
-        pass
+        return 0
+
 
 ## Check the syntax of the go file using syntax checker binary
 def _checkSyntax(path: str, gosyntax_bin: str) -> bool:
@@ -264,6 +326,7 @@ def _checkSyntax(path: str, gosyntax_bin: str) -> bool:
 
 ## Process Go Test files
 def processFile(file_path: str, gosyntax_bin: str) -> int:
+    global _CALLBACK_SCHEDULER
 
     temp_path = file_path + '.tmp'
     """ 
@@ -284,6 +347,12 @@ def processFile(file_path: str, gosyntax_bin: str) -> int:
     except Exception as e:
         print(f'An unexpected error occurred: {e}')
         return 1     
+
+    """
+        Schedule the deferred callbacks
+    """
+    for callbacks in _CALLBACK_SCHEDULER:
+        callbacks(temp_path)
 
     """ 
         Check the syntax of the injected go test file

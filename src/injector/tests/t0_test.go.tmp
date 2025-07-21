@@ -1,57 +1,14 @@
 package main
 
+import _ "time"
 import (
 	"fmt"
 	"testing"
 )
 
 // TC-1
-func
-BenchmarkTC1(t *testing.B) {
+func BenchmarkTC1(t *testing.B) {
 	for t.Loop() {
-			a := 3
-			fmt.Print(a)
-	}
-}
-
-// TC-2
-func BenchmarkTC2(t *testing.B) {
-	for t.Loop() {
-			a := 3
-			fmt.Print(a)
-	}
-}
-
-// TC-3
-func BenchmarkTC3(t *testing.B){
-	for t.Loop() {
-			a := 3
-			fmt.Print(a)
-	}
-}
-
-// TC-4
-func BenchmarkTC4(
-t *testing.B) {
-	for t.Loop() {
-			a := 3
-			fmt.Print(a)
-	}
-}
-
-// TC-5
-func BenchmarkTC5(
-t *testing.B,
-) {	for t.Loop() {
-			a := 3
-			fmt.Print(a)
-	}
-}
-
-// TC-6
-func BenchmarkTC6 (
-t *testing.B,
-){	for t.Loop() {
 			a := 3
 			fmt.Print(a)
 	}

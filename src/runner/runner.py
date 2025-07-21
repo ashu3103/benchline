@@ -24,7 +24,7 @@ def runBenchmarkTests(directory: str, output_log: Optional[str] = None) -> int:
 
     logger.info(f"[Runner] running Go benchmarks in: {directory}")
 
-    cmd = ["go", "test", "-bench=.", "-benchmem"]
+    cmd = ["go", "test", "-v", "-bench=.", "-benchmem", "-run=^$", "./..."]
     try:
         result = subprocess.run(
             cmd,

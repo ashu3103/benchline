@@ -3,6 +3,7 @@ import atexit
 import finder
 import injector
 import runner
+import parser
 from typing import List
 
 def usage():
@@ -43,6 +44,7 @@ def injectBenchmarkCodeWrapper(file: str) -> int:
 def runBenchmarkTestWrapper(project_directory: str, log_file: str) -> int:
     return runner.runBenchmarkTests(project_directory, log_file)
 
-runBenchmarkTestWrapper("/home/ashu3103/Desktop/go_tmp/heapdemo", "/home/ashu3103/Desktop/benchline/src/log.txt")
+def parseBenchmarkLogs(log_file: str) -> str:
+    return parser.parseBenchmarkLogs(log_file)
 
 

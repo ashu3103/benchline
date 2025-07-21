@@ -16,7 +16,7 @@ import subprocess
 import logging
 from typing import TextIO, Callable, List
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger('benchline')
 
 #### Constants Definitions ####
 
@@ -150,9 +150,11 @@ def _isParallelMethodPresent(line: str) -> bool:
 def _removeUnsupportedStatement(line: str):
     ## Simply skip the Parallel() method of t
     if (_isParallelMethodPresent(line)): 
+        logger.debug("'Parallel()' method detected in unit tests")
         return "", True
     ## Handle Deadline() elegantly
     if _isDeadlineMethodPresent(line):
+        logger.debug("'Deadline()' method detected in unit tests")
         return _handleDeadlineMethod(line), True
     
     return None, False
@@ -235,6 +237,7 @@ def _handleTestParameterDetection(line: str, reader: TextIO, writer: TextIO, out
     if (re.search(FUNC_TEST_ARG_TYPE_DETECTION_PATTERN, line)):
         line = line.replace("*testing.T", "*testing.B", 1)
         _UT_TEST_ARG_VARIABLE_NAME = _extractVariableName(line)
+        logger.debug(f"testing argument name: {_UT_TEST_ARG_VARIABLE_NAME}")
         return _handleFunctionBlockStartDetection(line, reader, writer, output)
     else:
         next_line = next(reader)
@@ -250,6 +253,7 @@ def _handleTestParameterDetection(line: str, reader: TextIO, writer: TextIO, out
         if (re.search(FUNC_TEST_ARG_TYPE_DETECTION_PATTERN, processed_next_line)):
             processed_next_line = processed_next_line.replace("*testing.T", "*testing.B", 1)
             _UT_TEST_ARG_VARIABLE_NAME = _extractVariableName(processed_next_line)
+            logger.debug(f"testing argument name: {_UT_TEST_ARG_VARIABLE_NAME}")
             return _handleFunctionBlockStartDetection(processed_next_line, reader, writer, output)
 
     output = output + next_line + NEWLINE
@@ -301,6 +305,7 @@ def _injectBenchmarkCode(reader: TextIO, writer: TextIO) -> int:
             output, present = _detectUnitTestFunctionStatement(line, reader, writer)
             ## Scan till the unit test (TestXxx) function is encountered
             if (present):
+                print(present)
                 logger.debug(f'unit test function detected')
                 ## variable name must be present
                 if not _UT_TEST_ARG_VARIABLE_NAME: 
@@ -331,18 +336,23 @@ def processFile(file_path: str) -> int:
     dev_arch = platform.machine()
     dev_os = platform.system()
 
+    logger.debug(f"system architecture: {dev_arch}")
+    logger.debug(f"system os: {dev_os}")
+
     if dev_arch.lower() == "amd64" or dev_arch.lower() == "x86_64":
         dev_arch = "amd64"
     elif dev_arch.lower() == "arm64" or dev_arch.lower() == "aarch64":
         dev_arch = "arm64"
     else:
-        # logger.error(f"System architecture {dev_arch} not compatible")
+        logger.error(f"system architecture {dev_arch} not compatible")
         return 1
     
     if dev_os.lower() == "linux":
         dev_os = "linux"
+    elif dev_os.lower() == "darwin":
+        dev_os = "mac"
     else:
-        # logger.error(f"System operating system {dev_os} not compatible")
+        logger.error(f"system os {dev_os} not compatible")
         return 1
 
 
@@ -357,16 +367,16 @@ def processFile(file_path: str) -> int:
         with open(file_path, 'r', encoding="utf-8") as r, open(temp_path, 'w', encoding="utf-8") as w:
             if (_injectBenchmarkCode(r, w)): return 1
     except FileNotFoundError:
-        print(f'File {file_path} not found')
+        logger.error(f'File {file_path} not found')
         return 1
     except PermissionError:
-        print(f'Permissions denied to read {file_path}')
+        logger.error(f'Permissions denied to read {file_path}')
         return 1
     except IOError as e:
-        print(f'An I/O exception has occurred')
+        logger.error(f'An I/O exception has occurred')
         return 1
     except Exception as e:
-        print(f'An unexpected error occurred: {e}')
+        logger.error(f'An unexpected error occurred: {e}')
         return 1     
 
     """
@@ -379,23 +389,23 @@ def processFile(file_path: str) -> int:
         Check the syntax of the injected go test file
     """
     if _checkSyntax(temp_path, gosyntax_bin):
-        print(f'benchmark test injection in {file_path} success')
+        logger.info(f'benchmark test injection in {file_path} success')
         try:
             os.replace(temp_path, file_path)  # overwrite original file
         except OSError as e:
-            print(f'An OS error occurred: {e}')
+            logger.error(f'An OS error occurred: {e}')
             return 1
     else:
-        print(f'benchmark test injection in {file_path} failed')
+        logger.warning(f'benchmark test injection in {file_path} failed')
         try:
             os.remove(temp_path)
         except OSError as e:
-            print(f'An OS error occurred: {e}')
+            logger.error(f'An OS error occurred: {e}')
             return 1
 
     return 0
 
-print(platform.system())
-print(platform.machine())
-if processFile("/home/ashu3103/Desktop/benchline/src/injector/tests/t1_test.go"):
-    print("error")
+# print(platform.system())
+# print(platform.machine())
+# if processFile("/home/ashu3103/Desktop/benchline/src/injector/tests/t1_test.go"):
+#     print("error")

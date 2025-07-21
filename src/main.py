@@ -1,6 +1,7 @@
 import logging
 import atexit
 import finder
+import injector
 from typing import List
 
 def usage():
@@ -34,6 +35,8 @@ atexit.register(logging.shutdown)
 def findTestFilesWrapper(root: str) -> List[str]:
     return finder.findTestFiles(root)
 
+def injectBenchmarkCodeWrapper(file: str) -> int:
+    return injector.processFile(file)
 
 
 

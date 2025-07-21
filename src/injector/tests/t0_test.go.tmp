@@ -8,7 +8,7 @@ import (
 // TC-1
 func
 BenchmarkTC1(t *testing.B) {
-	for i := 0; i < t.N; i++ {
+	for t.Loop() {
 			a := 3
 			fmt.Print(a)
 	}
@@ -16,7 +16,7 @@ BenchmarkTC1(t *testing.B) {
 
 // TC-2
 func BenchmarkTC2(t *testing.B) {
-	for i := 0; i < t.N; i++ {
+	for t.Loop() {
 			a := 3
 			fmt.Print(a)
 	}
@@ -24,7 +24,7 @@ func BenchmarkTC2(t *testing.B) {
 
 // TC-3
 func BenchmarkTC3(t *testing.B){
-	for i := 0; i < t.N; i++ {
+	for t.Loop() {
 			a := 3
 			fmt.Print(a)
 	}
@@ -33,7 +33,7 @@ func BenchmarkTC3(t *testing.B){
 // TC-4
 func BenchmarkTC4(
 t *testing.B) {
-	for i := 0; i < t.N; i++ {
+	for t.Loop() {
 			a := 3
 			fmt.Print(a)
 	}
@@ -42,7 +42,7 @@ t *testing.B) {
 // TC-5
 func BenchmarkTC5(
 t *testing.B,
-) {	for i := 0; i < t.N; i++ {
+) {	for t.Loop() {
 			a := 3
 			fmt.Print(a)
 	}
@@ -51,7 +51,7 @@ t *testing.B,
 // TC-6
 func BenchmarkTC6 (
 t *testing.B,
-){	for i := 0; i < t.N; i++ {
+){	for t.Loop() {
 			a := 3
 			fmt.Print(a)
 	}

@@ -114,6 +114,8 @@ class Peekable:
 
 #### Function Definitions ####
 
+def _extract
+
 def _isValidLine(line: str) -> bool:
     if (line == ''): return False
     return True
@@ -128,17 +130,19 @@ def _extractVariableName(line: str) -> str:
         v = l
     return v.strip().split(',')[0].strip().split(' ')[0]
 
-def _handleFunctionBlockStartDetection(line: str, reader: TextIO, writer: TextIO) -> bool:
+def _handleFunctionBlockStartDetection(line: str, reader: TextIO, writer: TextIO, output: str) -> bool:
     global _UT_FUNCTION_SCOPE
     global _UT_TEST_ARG_VARIABLE_NAME
 
     if (re.search(FUNC_BLOCK_START_DETECTION_PATTERN, line)):
-        writer.write(line + NEWLINE)
+        output = output + line + NEWLINE
         _UT_FUNCTION_SCOPE = _UT_FUNCTION_SCOPE + 1
+        writer.write(output)
         return True
     else:
         next_line = next(reader)
-        writer.write(line + NEWLINE)
+        output = output + line + NEWLINE
+        # writer.write(line + NEWLINE)
 
         processed_next_line = next_line[:].strip()
         ## find next valid line
@@ -147,23 +151,26 @@ def _handleFunctionBlockStartDetection(line: str, reader: TextIO, writer: TextIO
             processed_next_line = next_line[:].strip()
         
         if (re.search(FUNC_BLOCK_START_DETECTION_PATTERN, processed_next_line)):
-            writer.write(processed_next_line)
+            output = output + processed_next_line + NEWLINE
+            # writer.write(processed_next_line)
             _UT_FUNCTION_SCOPE = _UT_FUNCTION_SCOPE + 1
+            writer.write(output)
             return True
         
     _UT_TEST_ARG_VARIABLE_NAME = None
     return False
 
-def _handleTestParameterDetection(line: str, reader: TextIO, writer: TextIO) -> bool:
+def _handleTestParameterDetection(line: str, reader: TextIO, writer: TextIO, output: str) -> bool:
     global _UT_TEST_ARG_VARIABLE_NAME
     ## Check if the current line has '*testing.T' if not get to next line
     if (re.search(FUNC_TEST_ARG_TYPE_DETECTION_PATTERN, line)):
         line = line.replace("*testing.T", "*testing.B", 1)
         _UT_TEST_ARG_VARIABLE_NAME = _extractVariableName(line)
-        return _handleFunctionBlockStartDetection(line, reader, writer)
+        return _handleFunctionBlockStartDetection(line, reader, writer, output)
     else:
         next_line = next(reader)
-        writer.write(line + NEWLINE)
+        output = output + line + NEWLINE
+        # writer.write(line + NEWLINE)
 
         processed_next_line = next_line[:].strip()
         ## find next valid line
@@ -174,18 +181,19 @@ def _handleTestParameterDetection(line: str, reader: TextIO, writer: TextIO) -> 
         if (re.search(FUNC_TEST_ARG_TYPE_DETECTION_PATTERN, processed_next_line)):
             processed_next_line = processed_next_line.replace("*testing.T", "*testing.B", 1)
             _UT_TEST_ARG_VARIABLE_NAME = _extractVariableName(processed_next_line)
-            return _handleFunctionBlockStartDetection(processed_next_line, reader, writer)
+            return _handleFunctionBlockStartDetection(processed_next_line, reader, writer, output)
 
     return False
 
-def _handleTestFuncNameDetection(line: str, reader: TextIO, writer: TextIO) -> bool:
+def _handleTestFuncNameDetection(line: str, reader: TextIO, writer: TextIO, output: str) -> bool:
     ## Check if the current line has `TestXxx`` if not get the next valid line
     if (re.search(FUNC_TEST_NAME_DETECTION_PATTERN, line)):
         line = line.replace("Test", "Benchmark", 1)
-        return _handleTestParameterDetection(line, reader, writer)
+        return _handleTestParameterDetection(line, reader, writer, output)
     else:
         next_line = next(reader)
-        writer.write(line + NEWLINE)
+        output = output + line + NEWLINE
+        # writer.write(line + NEWLINE)
 
         processed_next_line = next_line[:].strip()
         ## find next valid line
@@ -195,15 +203,16 @@ def _handleTestFuncNameDetection(line: str, reader: TextIO, writer: TextIO) -> b
         
         if (re.search(FUNC_TEST_NAME_DETECTION_PATTERN, processed_next_line)):
             processed_next_line = processed_next_line.replace("Test", "Benchmark", 1)
-            return _handleTestParameterDetection(processed_next_line, reader, writer)
+            return _handleTestParameterDetection(processed_next_line, reader, writer, output)
 
     return False
 
 def _detectUnitTestFunctionStatement(line: str, reader: TextIO, writer: TextIO) -> bool:
     processed_line = line[:].strip()
+    output = ""
 
     if (re.search(FUNC_KEYWORD_DETECTION_PATTERN, processed_line)):
-        return _handleTestFuncNameDetection(processed_line, reader, writer)
+        return _handleTestFuncNameDetection(processed_line, reader, writer, output)
     return False
 
 # TODO: If the function like `_detectUnitTestFunctionStatement` can read next line, the lineno may not be
@@ -221,9 +230,11 @@ def _injectBenchmarkCode(reader: TextIO, writer: TextIO) -> int:
                 ## variable name must be present
                 if not _UT_TEST_ARG_VARIABLE_NAME: 
                     return 1
-                writer.write(f'\tfor i := 0; i < {_UT_TEST_ARG_VARIABLE_NAME}.N; i++ {CURLY_BRACE_OPEN}\n')
+                writer.write(f'\tfor {_UT_TEST_ARG_VARIABLE_NAME}.Loop() {CURLY_BRACE_OPEN}\n')
             else:
                 if _UT_TEST_ARG_VARIABLE_NAME:
+                    if (line.count(UT_PARAMETER_TYPE_KEYWORD)):
+                        line = line.replace(UT_PARAMETER_TYPE_KEYWORD, BT_PARAMETER_TYPE_KEYWORD)
                     _UT_FUNCTION_SCOPE = _UT_FUNCTION_SCOPE + line.count(CURLY_BRACE_OPEN) - line.count(CURLY_BRACE_CLOSE)
 
                 ## This marks the ending of a unit test function
@@ -294,5 +305,5 @@ def processFile(file_path: str, gosyntax_bin: str) -> int:
 
     return 0
 
-if processFile("/home/ashu3103/Desktop/benchline/src/injector/tests/t0_test.go", ""):
+if processFile("/home/ashu3103/Desktop/benchline/src/injector/tests/t1_test.go", ""):
     print("error")

@@ -10,6 +10,7 @@
 """
 from enum import Enum
 import os
+import platform
 import re
 import subprocess
 import logging
@@ -312,7 +313,6 @@ def _injectBenchmarkCode(reader: TextIO, writer: TextIO) -> int:
     except StopIteration:
         return 0
 
-
 ## Check the syntax of the go file using syntax checker binary
 def _checkSyntax(path: str, gosyntax_bin: str) -> bool:
     with open(path, "rb") as f:
@@ -325,8 +325,29 @@ def _checkSyntax(path: str, gosyntax_bin: str) -> bool:
     return proc.returncode == 0
 
 ## Process Go Test files
-def processFile(file_path: str, gosyntax_bin: str) -> int:
+def processFile(file_path: str) -> int:
     global _CALLBACK_SCHEDULER
+
+    dev_arch = platform.machine()
+    dev_os = platform.system()
+
+    if dev_arch.lower() == "amd64" or dev_arch.lower() == "x86_64":
+        dev_arch = "amd64"
+    elif dev_arch.lower() == "arm64" or dev_arch.lower() == "aarch64":
+        dev_arch = "arm64"
+    else:
+        # logger.error(f"System architecture {dev_arch} not compatible")
+        return 1
+    
+    if dev_os.lower() == "linux":
+        dev_os = "linux"
+    else:
+        # logger.error(f"System operating system {dev_os} not compatible")
+        return 1
+
+
+    gosyntax_bin = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bin")
+    gosyntax_bin = os.path.join(gosyntax_bin, f"syntaxchecker-{dev_os}-{dev_arch}")
 
     temp_path = file_path + '.tmp'
     """ 
@@ -334,7 +355,7 @@ def processFile(file_path: str, gosyntax_bin: str) -> int:
     """
     try:
         with open(file_path, 'r', encoding="utf-8") as r, open(temp_path, 'w', encoding="utf-8") as w:
-            return _injectBenchmarkCode(r, w)
+            if (_injectBenchmarkCode(r, w)): return 1
     except FileNotFoundError:
         print(f'File {file_path} not found')
         return 1
@@ -357,22 +378,24 @@ def processFile(file_path: str, gosyntax_bin: str) -> int:
     """ 
         Check the syntax of the injected go test file
     """
-    # if _checkSyntax(temp_path, gosyntax_bin):
-    #     logger.info(f'benchmark test injection in {file_path} success')
-    #     try:
-    #         os.replace(temp_path, file_path)  # overwrite original file
-    #     except OSError as e:
-    #         logger.error(f'An OS error occurred: {e}')
-    #         return 1
-    # else:
-    #     logger.warning(f'benchmark test injection in {file_path} failed')
-    #     try:
-    #         os.remove(temp_path)
-    #     except OSError as e:
-    #         logger.error(f'An OS error occurred: {e}')
-    #         return 1
+    if _checkSyntax(temp_path, gosyntax_bin):
+        print(f'benchmark test injection in {file_path} success')
+        try:
+            os.replace(temp_path, file_path)  # overwrite original file
+        except OSError as e:
+            print(f'An OS error occurred: {e}')
+            return 1
+    else:
+        print(f'benchmark test injection in {file_path} failed')
+        try:
+            os.remove(temp_path)
+        except OSError as e:
+            print(f'An OS error occurred: {e}')
+            return 1
 
     return 0
 
-if processFile("/home/ashu3103/Desktop/benchline/src/injector/tests/t1_test.go", ""):
+print(platform.system())
+print(platform.machine())
+if processFile("/home/ashu3103/Desktop/benchline/src/injector/tests/t1_test.go"):
     print("error")

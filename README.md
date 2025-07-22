@@ -65,7 +65,8 @@ Suppose we have a pool of go projects (in a directory)
 
 Run:
 ```
-benchline </path/to/pool>
+cd src/
+./benchline.py </path/to/pool>
 ```
 
 For now the tool will execute in default configuration (TODO: will make it configurable based on user inputs)

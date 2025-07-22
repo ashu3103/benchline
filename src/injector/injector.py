@@ -332,6 +332,13 @@ def _checkSyntax(path: str, gosyntax_bin: str) -> bool:
 ## Process Go Test files
 def processFile(file_path: str) -> int:
     global _CALLBACK_SCHEDULER
+    global _UT_FUNCTION_SCOPE
+    global _UT_TEST_ARG_VARIABLE_NAME
+
+    ## Reset the global states
+    _CALLBACK_SCHEDULER = []
+    _UT_FUNCTION_SCOPE = 0
+    _UT_TEST_ARG_VARIABLE_NAME = None
 
     dev_arch = platform.machine()
     dev_os = platform.system()

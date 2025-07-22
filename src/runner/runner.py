@@ -1,7 +1,7 @@
 """
     The **runner** package is pretty simple, it will just take the benchmark codes and execute
     the traditional `go test...` command over the project directory and output the result in a log
-    file which will then be passed to analyser
+    file which will then be passed to scrapper
 """
 
 import os

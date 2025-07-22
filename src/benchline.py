@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+
 import logging
 import atexit
 import finder
@@ -16,7 +18,7 @@ repo_json_path: str = None
 project_src_directory = os.path.abspath(os.getcwd())
 
 def usage():
-    print('benchline </path/to/project/pool>')
+    print('./benchline.py </path/to/project/pool>')
 
 def _initLogger():
     formatter = logging.Formatter(

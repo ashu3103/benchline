@@ -180,7 +180,6 @@ def dumpMetrics(json_file_path: str):
     metrics['total_packages'] = _TOTAL_PACKAGES
     metrics['total_time'] = f'{total_time}s'
 
-    print(metrics)
     if json_file_path:
         with open(json_file_path, 'w') as json_file:
             json.dump(metrics, json_file, indent=4)

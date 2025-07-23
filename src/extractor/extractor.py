@@ -20,6 +20,7 @@ _TOTAL_PACKAGES = 0
 
 _FAIL_VERDICT_PATTERN = r"FAIL\s+([^\s]+)\s+([\d.]+)s"
 _PASS_VERDICT_PATTERN = r"ok\s+([^\s]+)\s+([\d.]+)s"
+_MISSING_VERDICT_PATTERN = r"?\s+([^\s]+)\s+([\d.]+)s"
 
 _TESTCASE_PATTERN = r'^(Benchmark\S+)\s+\d+\s+[\d.]+\s+ns/op\s+(\d+)\s+B/op\s+(\d+)\s+allocs/op'
 
@@ -83,6 +84,8 @@ def _extractTestcase(pkg: Package, lines: List[str], i: int) -> int:
 def _extractPackage(lines: List[str], i: int) -> int:
     global _FAIL_VERDICT_PATTERN
     global _PASS_VERDICT_PATTERN
+    global _MISSING_VERDICT_PATTERN
+    global _TOTAL_PACKAGES
     global _METRIC_DATA
 
     ## Base Case
@@ -100,6 +103,7 @@ def _extractPackage(lines: List[str], i: int) -> int:
             idx = _extractTestcase(pkg, lines, i-1)
             if (idx != -1):
                 _METRIC_DATA.append(pkg)
+            _TOTAL_PACKAGES = _TOTAL_PACKAGES + 1
             return idx
         else:
             return -1
@@ -111,9 +115,12 @@ def _extractPackage(lines: List[str], i: int) -> int:
             idx = _extractTestcase(pkg, lines, i-1)
             if (idx != -1):
                 _METRIC_DATA.append(pkg)
+            _TOTAL_PACKAGES = _TOTAL_PACKAGES + 1
             return idx
         else:
             return -1
+    elif (curr_line.startswith('?')):
+        return i
     else:
         return -1
 
@@ -147,7 +154,6 @@ def extractBenchmarkLogs(log: str) -> int:
                 return 1
             
             i = idx
-            _TOTAL_PACKAGES = _TOTAL_PACKAGES + 1
 
         i = i - 1
 

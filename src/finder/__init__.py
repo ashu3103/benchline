@@ -1,1 +1,1 @@
-from .finder import findTestFiles
+from .finder import findTestFiles, readExcludedFile

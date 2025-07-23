@@ -15,11 +15,21 @@ from typing import List
 
 logger = logging.getLogger('benchline')
 
-_EXCLUDED_DIRS = {"vendor", "testdata", ".git", "third_party", "node_modules", "bin", "out"}
+_EXCLUDED_DIRS = {"vendor", "testdata", ".git", "third_party", "node_modules", "bin", "out", "doc", "docs", "data", "assets", "static"}
 _STANDARD_TEST_DIRS = ['test', 'tests']
 
 def _isDirectory(path: str) -> bool:
     return os.path.isdir(path)
+
+def readExcludedFile(path: str) -> List[str]:
+    file = os.path.join(path, 'benchline.exclude')
+
+    if (not os.path.isfile(file)): return []
+
+    with open(file, 'r') as f:
+        lines = f.readlines()
+    
+    return [line.strip() for line in lines]
 
 def _isExcluded(dirname: str) -> bool:
     return dirname in _EXCLUDED_DIRS
@@ -45,6 +55,7 @@ def _doFindTestFiles(root: str) -> List[str]:
 
 
 def findTestFiles(root: str) -> List[str]:
+
     if not _isDirectory(root):
         logger.error(f'[Finder] {root} is not a valid directory')
         return []

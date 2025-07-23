@@ -46,9 +46,12 @@ def _findTestFilesWrapper(root: str) -> List[str]:
     return finder.findTestFiles(root)
 
 ## Inject Benchmark Code
-def _injectBenchmarkCodeWrapper(files: List[str]) -> int:
+def _injectBenchmarkCodeWrapper(files: List[str], excluded_files: List[str]) -> int:
     for file in files:
-        res = injector.processFile(file)
+        if file.split('/')[-1] in excluded_files:
+            res = injector.processFile(file, True)
+        else:
+            res = injector.processFile(file, False)
         if res: 
             logger.error(f"[Benchline] error injecting code in {file}")
             return 1
@@ -72,13 +75,15 @@ def _runPipeline(go_dir: str) -> int:
         logger.info(f"[Benchline] no test file found in {go_dir}")
         return 0
     
-    if (_injectBenchmarkCodeWrapper(test_files)):
+    excluded_files = finder.readExcludedFile(go_dir)
+
+    if (_injectBenchmarkCodeWrapper(test_files, excluded_files)):
         logger.error(f"[Benchline] error injecting benchmark code in {go_dir}")
 
     if not repo_log_path:
         logger.error("[Benchline] repo log path not set")
         return 1
-    log_file = os.path.join(repo_log_path, project_name)
+    log_file = os.path.join(repo_log_path, f'{project_name}.log')
 
     if (_runBenchmarkTestWrapper(go_dir, log_file)):
         logger.error(f"[Benchline] error running benchmark test in {go_dir}")
@@ -89,7 +94,7 @@ def _runPipeline(go_dir: str) -> int:
     if not repo_json_path:
         logger.error("[Benchline] repo json path not set")
         return 1
-    json_file = os.path.join(repo_json_path, project_name)
+    json_file = os.path.join(repo_json_path, f'{project_name}.json')
 
     _dumpMetricsWrapper(json_file)
 

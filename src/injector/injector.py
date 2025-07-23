@@ -23,6 +23,8 @@ logger = logging.getLogger('benchline')
 _UT_FUNCTION_SCOPE = 0
 _UT_TEST_ARG_VARIABLE_NAME = None
 
+_IS_FILE_EXCLUDED = False
+
 _CALLBACK_SCHEDULER: List[Callable[[str], None]] = []
 
 ## Tokens
@@ -182,6 +184,8 @@ def _processLine(line: str) -> str:
                 res = res.replace(UT_PARAMETER_TYPE_KEYWORD, BT_PARAMETER_TYPE_KEYWORD)
             res = "\t\t" + res
     else:
+        if (res.count(UT_PARAMETER_TYPE_KEYWORD)):
+                res = res.replace(UT_PARAMETER_TYPE_KEYWORD, BT_PARAMETER_TYPE_KEYWORD)
         if (re.search(IMPORT_KEYWORD_DETECTION_PATTERN, res)):
             res = "import _ \"time\"" + NEWLINE + res
 
@@ -208,7 +212,7 @@ def _handleFunctionBlockStartDetection(line: str, reader: TextIO, writer: TextIO
     if (re.search(FUNC_BLOCK_START_DETECTION_PATTERN, line)):
         output = output + line + NEWLINE
         _UT_FUNCTION_SCOPE = _UT_FUNCTION_SCOPE + 1
-        writer.write(output)
+        # writer.write(output)
         return output, True
     else:
         next_line = next(reader)
@@ -224,7 +228,7 @@ def _handleFunctionBlockStartDetection(line: str, reader: TextIO, writer: TextIO
             output = output + processed_next_line + NEWLINE
             # writer.write(processed_next_line)
             _UT_FUNCTION_SCOPE = _UT_FUNCTION_SCOPE + 1
-            writer.write(output)
+            # writer.write(output)
             return output, True
         
     _UT_TEST_ARG_VARIABLE_NAME = None
@@ -260,9 +264,13 @@ def _handleTestParameterDetection(line: str, reader: TextIO, writer: TextIO, out
     return output, False
 
 def _handleTestFuncNameDetection(line: str, reader: TextIO, writer: TextIO, output: str) -> bool:
+    global _IS_FILE_EXCLUDED
     ## Check if the current line has `TestXxx`` if not get the next valid line
     if (re.search(FUNC_TEST_NAME_DETECTION_PATTERN, line)):
-        line = line.replace("Test", "Benchmark", 1)
+        if _IS_FILE_EXCLUDED:
+            line = line.replace("Test", "ExcludedTest", 1)
+        else:
+            line = line.replace("Test", "Benchmark", 1)
         return _handleTestParameterDetection(line, reader, writer, output)
     else:
         next_line = next(reader)
@@ -292,6 +300,19 @@ def _detectUnitTestFunctionStatement(line: str, reader: TextIO, writer: TextIO) 
     output = output + line
     return output, False
 
+def _addExclusionBuildTags(reader: TextIO, writer: TextIO) -> int:
+    writer.write("//go:build benchline_exclude\n")
+    writer.write("// +build benchline_exclude\n")
+    writer.write("\n")
+
+    try:
+        while True:
+            line = next(reader)
+            writer.write(line)
+
+    except StopIteration:
+        return 0
+
 # TODO: If the function like `_detectUnitTestFunctionStatement` can read next line, the lineno may not be
 # accuarte
 def _injectBenchmarkCode(reader: TextIO, writer: TextIO) -> int:
@@ -305,7 +326,7 @@ def _injectBenchmarkCode(reader: TextIO, writer: TextIO) -> int:
             output, present = _detectUnitTestFunctionStatement(line, reader, writer)
             ## Scan till the unit test (TestXxx) function is encountered
             if (present):
-                print(present)
+                writer.write(output)
                 logger.debug(f'[Injector] unit test function detected')
                 ## variable name must be present
                 if not _UT_TEST_ARG_VARIABLE_NAME: 
@@ -330,13 +351,15 @@ def _checkSyntax(path: str, gosyntax_bin: str) -> bool:
     return proc.returncode == 0
 
 ## Process Go Test files
-def processFile(file_path: str) -> int:
+def processFile(file_path: str, is_excluded: bool) -> int:
     global _CALLBACK_SCHEDULER
     global _UT_FUNCTION_SCOPE
     global _UT_TEST_ARG_VARIABLE_NAME
+    global _IS_FILE_EXCLUDED
 
     ## Reset the global states
     _CALLBACK_SCHEDULER = []
+    _IS_FILE_EXCLUDED = is_excluded
     _UT_FUNCTION_SCOPE = 0
     _UT_TEST_ARG_VARIABLE_NAME = None
 
@@ -411,8 +434,3 @@ def processFile(file_path: str) -> int:
             return 1
 
     return 0
-
-# print(platform.system())
-# print(platform.machine())
-# if processFile("/home/ashu3103/Desktop/benchline/src/injector/tests/t1_test.go"):
-#     print("error")

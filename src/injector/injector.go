@@ -1,6 +1,7 @@
 package injector
 
 import (
+	"slices"
 	"fmt"
 	"go/ast"
 	"go/parser"
@@ -17,6 +18,14 @@ const (
 	BENCHMARK_PREFIX          = "benchmark_"
 	TESTING_FUNCTION_PREFIX   = "Test"
 	BENCHMARK_FUNCTION_PREFIX = "Benchmark"
+)
+
+var (
+	funcTestParamName = "t"
+	tOnlyMethods = map[string]bool{
+		"Parallel": true,
+		"Deadline": true,
+	}
 )
 
 func checkPermissions(file string) error {
@@ -67,10 +76,10 @@ func modifyName(fn *ast.FuncDecl) error {
 	return nil
 }
 
-func modifyParamAndType(fn *ast.FuncDecl) error {
+func modifyParamAndType(params *ast.FieldList) error {
 	done := 0
 	/* modify parameter type */
-	fieldList := fn.Type.Params.List
+	fieldList := params.List
 	for _, field := range fieldList {
 		if len(field.Names) == 1 {
 			/* filter field type of struct */
@@ -82,6 +91,7 @@ func modifyParamAndType(fn *ast.FuncDecl) error {
 							return fmt.Errorf("parameter list is ambiguos, cannot modify this function")
 						}
 						selExpr.Sel.Name = "B"
+						funcTestParamName = field.Names[0].Name
 						done = 1
 					}
 				}
@@ -96,6 +106,90 @@ func modifyParamAndType(fn *ast.FuncDecl) error {
 	return nil
 }
 
+func searchTMethods(expr ast.Expr) bool {
+	call, ok := expr.(*ast.CallExpr)
+    if !ok {
+        return false
+    }
+    sel, ok := call.Fun.(*ast.SelectorExpr)
+    if !ok {
+        return false
+    }
+    ident, ok := sel.X.(*ast.Ident)
+    if !ok {
+        return false
+    }
+    return ident.Name == funcTestParamName && tOnlyMethods[sel.Sel.Name]
+}
+
+func modifyBody(stmt ast.Stmt) bool {
+	switch s := stmt.(type) {
+		case *ast.BlockStmt:
+			i := 0
+			for _, st := range s.List {
+				if modifyBody(st) {
+					s.List[i] = st
+					i++
+				}
+			}
+			s.List = s.List[:i]
+		case *ast.IfStmt:
+			modifyBody(s.Body)
+			if s.Else != nil {
+				modifyBody(s.Else)
+			}
+		case *ast.ForStmt:
+			modifyBody(s.Body)
+		case *ast.SwitchStmt:
+			modifyBody(s.Body)
+		case *ast.AssignStmt:
+			if slices.ContainsFunc(s.Rhs, searchTMethods) {
+				return false
+			}
+		case *ast.CaseClause:
+			i := 0
+			for _, st := range s.Body {
+				if modifyBody(st) {
+					s.Body[i] = st
+					i++
+				}
+			}
+			s.Body = s.Body[:i]
+		case *ast.CommClause:
+			i := 0
+			for _, st := range s.Body {
+				if modifyBody(st) {
+					s.Body[i] = st
+					i++
+				}
+			}
+			s.Body = s.Body[:i]
+		case *ast.RangeStmt:
+			modifyBody(s.Body)
+		case *ast.SelectStmt:
+			modifyBody(s.Body)
+		case *ast.TypeSwitchStmt:
+			modifyBody(s.Body)
+			if s.Init != nil {
+				modifyBody(s.Init)  // handles: switch x := t.Deadline(); ...
+			}
+		case *ast.ExprStmt:
+			if searchTMethods(s.X) {
+				return false
+			}
+		case *ast.GoStmt:
+			if searchTMethods(s.Call) {
+				return false
+			}
+		case *ast.DeferStmt:
+			if searchTMethods(s.Call) {
+				return false
+			}
+	}
+
+	return true
+}
+
 func modifyFunction(fn *ast.FuncDecl) error {
 	/* clear all docs */
 	fn.Doc = nil
@@ -107,10 +201,13 @@ func modifyFunction(fn *ast.FuncDecl) error {
 	}
 
 	/* change parameter name and type */
-	err = modifyParamAndType(fn)
+	err = modifyParamAndType(fn.Type.Params)
 	if err != nil {
 		return err
 	}
+
+	/* change the body of the function */
+	modifyBody(fn.Body)
 
 	return nil
 }

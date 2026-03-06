@@ -1,7 +1,7 @@
 package injector
 
 import (
-	"slices"
+	"bytes"
 	"fmt"
 	"go/ast"
 	"go/parser"
@@ -10,22 +10,18 @@ import (
 	"log"
 	"os"
 	"path/filepath"
-	"strings"
+	// "slices"
 	"syscall"
+
+	"golang.org/x/tools/imports"
 )
 
 const (
 	BENCHMARK_PREFIX          = "benchmark_"
 	TESTING_FUNCTION_PREFIX   = "Test"
 	BENCHMARK_FUNCTION_PREFIX = "Benchmark"
-)
 
-var (
-	funcTestParamName = "t"
-	tOnlyMethods = map[string]bool{
-		"Parallel": true,
-		"Deadline": true,
-	}
+	NOOP_FUNCTION_NAME        = "BENCHLINE_NOOP"
 )
 
 func checkPermissions(file string) error {
@@ -63,187 +59,35 @@ func checkPermissions(file string) error {
 	return nil
 }
 
-func modifyName(fn *ast.FuncDecl) error {
-	oldName := fn.Name.Name
-
-	if !strings.HasPrefix(oldName, TESTING_FUNCTION_PREFIX) {
-		return fmt.Errorf("unexpected function declaration, not a testing function")
-	}
-
-	newName := strings.ReplaceAll(oldName, TESTING_FUNCTION_PREFIX, BENCHMARK_FUNCTION_PREFIX)
-	fn.Name.Name = newName
-
-	return nil
-}
-
-func modifyParamAndType(params *ast.FieldList) error {
-	done := 0
-	/* modify parameter type */
-	fieldList := params.List
-	for _, field := range fieldList {
-		if len(field.Names) == 1 {
-			/* filter field type of struct */
-			if starExpr, ok := field.Type.(*ast.StarExpr); ok {
-				if selExpr, ok := starExpr.X.(*ast.SelectorExpr); ok {
-					pkg, ok := selExpr.X.(*ast.Ident);
-					if ok && pkg.Name == "testing" && selExpr.Sel.Name == "T" {
-						if done == 1 {
-							return fmt.Errorf("parameter list is ambiguos, cannot modify this function")
-						}
-						selExpr.Sel.Name = "B"
-						funcTestParamName = field.Names[0].Name
-						done = 1
-					}
-				}
-			}
-		}
-	}
-
-	if done == 0 {
-		return fmt.Errorf("no parameter matches the testing.T type")
-	}
-
-	return nil
-}
-
-func searchTMethods(expr ast.Expr) bool {
-	call, ok := expr.(*ast.CallExpr)
-    if !ok {
-        return false
-    }
-    sel, ok := call.Fun.(*ast.SelectorExpr)
-    if !ok {
-        return false
-    }
-    ident, ok := sel.X.(*ast.Ident)
-    if !ok {
-        return false
-    }
-    return ident.Name == funcTestParamName && tOnlyMethods[sel.Sel.Name]
-}
-
-func modifyBody(stmt ast.Stmt) bool {
-	switch s := stmt.(type) {
-		case *ast.BlockStmt:
-			i := 0
-			for _, st := range s.List {
-				if modifyBody(st) {
-					s.List[i] = st
-					i++
-				}
-			}
-			s.List = s.List[:i]
-		case *ast.IfStmt:
-			modifyBody(s.Body)
-			if s.Else != nil {
-				modifyBody(s.Else)
-			}
-		case *ast.ForStmt:
-			modifyBody(s.Body)
-		case *ast.SwitchStmt:
-			modifyBody(s.Body)
-		case *ast.AssignStmt:
-			if slices.ContainsFunc(s.Rhs, searchTMethods) {
-				return false
-			}
-		case *ast.CaseClause:
-			i := 0
-			for _, st := range s.Body {
-				if modifyBody(st) {
-					s.Body[i] = st
-					i++
-				}
-			}
-			s.Body = s.Body[:i]
-		case *ast.CommClause:
-			i := 0
-			for _, st := range s.Body {
-				if modifyBody(st) {
-					s.Body[i] = st
-					i++
-				}
-			}
-			s.Body = s.Body[:i]
-		case *ast.RangeStmt:
-			modifyBody(s.Body)
-		case *ast.SelectStmt:
-			modifyBody(s.Body)
-		case *ast.TypeSwitchStmt:
-			modifyBody(s.Body)
-			if s.Init != nil {
-				modifyBody(s.Init)  // handles: switch x := t.Deadline(); ...
-			}
-		case *ast.ExprStmt:
-			if searchTMethods(s.X) {
-				return false
-			}
-		case *ast.GoStmt:
-			if searchTMethods(s.Call) {
-				return false
-			}
-		case *ast.DeferStmt:
-			if searchTMethods(s.Call) {
-				return false
-			}
-	}
-
-	return true
-}
-
-func modifyFunction(fn *ast.FuncDecl) error {
-	/* clear all docs */
-	fn.Doc = nil
-
-	/* change name */
-	err := modifyName(fn)
-	if err != nil {
-		return err
-	}
-
-	/* change parameter name and type */
-	err = modifyParamAndType(fn.Type.Params)
-	if err != nil {
-		return err
-	}
-
-	/* change the body of the function */
-	modifyBody(fn.Body)
-
-	return nil
-}
-
-func inject(node *ast.File) error {
-	/* out of all decls select the FuncDecl with name TestXxx */
-	var filteredFuncDecls []ast.Decl
-	var filteredImportDecls []ast.Decl
-
-	for _, decl := range node.Decls {
-		fn, ok := decl.(*ast.FuncDecl)
-		// keep if its a testing function, drop everything else
-		if ok && strings.HasPrefix(fn.Name.Name, TESTING_FUNCTION_PREFIX) {
-			/* change body of the filtered Testing functions */
-			err := modifyFunction(fn)
-
-			if err != nil {
-				log.Printf("error: %v while modifying function %v...skipping", err, fn.Name.Name)
-			} else {
-				filteredFuncDecls = append(filteredFuncDecls, fn)
-			}
-		}
-
-		// keep the import declarations
-		gen, ok := decl.(*ast.GenDecl)
-		if ok && gen.Tok == token.IMPORT {
-			filteredImportDecls = append(filteredImportDecls, gen)
-		}
-	}
-
+func transformFile(node *ast.File) error {
+	/* setup */
+	clear(filteredDecls)
 	/* clear any comments in benchmarks */
 	clear(node.Comments)
 
+	funcSigVisitor := &FunctionSignatureVisitor{}
+	for _, decl := range node.Decls {
+		ast.Walk(funcSigVisitor, decl)
+	}
+
 	/* replace the decls in the node */
-	node.Decls = filteredImportDecls
-	node.Decls = append(node.Decls, filteredFuncDecls...)
+	node.Decls = filteredDecls
+	node.Decls = append(node.Decls, &ast.FuncDecl{
+		Name: ast.NewIdent(NOOP_FUNCTION_NAME),
+		Type: &ast.FuncType{
+            Params:  &ast.FieldList{},
+            Results: nil,
+        },
+        Body: &ast.BlockStmt{
+            List: nil,
+        },
+	})
+
+	funcVisitor := &FunctionVisitor{}
+	for _, decl := range node.Decls {
+		ast.Walk(funcVisitor, decl)
+	}
+
 	return nil
 }
 
@@ -263,7 +107,14 @@ func InjectBenchmark(file string) {
 	}
 
 	/* modify the AST nodes in-place */
-	err = inject(node)
+	err = transformFile(node)
+	if err != nil {
+		panic(err)
+	}
+
+	/* reconstruct ast back to source go code */
+	var buf bytes.Buffer
+	err = printer.Fprint(&buf, fset, node)
 	if err != nil {
 		panic(err)
 	}
@@ -276,14 +127,15 @@ func InjectBenchmark(file string) {
 	}
 	defer out.Close() // this ensures file is closed at the end of the InjectBecnhmark function
 
-	/* write the generated becnhmark code to the file */
-	_, err = out.WriteString("// --- Generated Benchmark Code ---\n")
+	/* remove unused imports and adds missing ones */
+	result, err := imports.Process(outFile, buf.Bytes(), nil)
 	if err != nil {
 		panic(err)
 	}
 
-	err = printer.Fprint(out, fset, node)
+	/* write the generated benchmark code to the file */
+	err = os.WriteFile(outFile, result, 0666)
 	if err != nil {
-		panic(err)
+		log.Fatal(err)
 	}
 }

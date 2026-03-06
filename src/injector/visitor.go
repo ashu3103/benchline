@@ -13,8 +13,10 @@ var (
 		"Deadline": true,
 	}
 	filteredDecls []ast.Decl
+	tParamFuncs = map[string]bool{}
 )
 
+type FunctionSignatureVisitor struct {}
 type FunctionVisitor struct {}
 type BodyVisitor struct {}
 
@@ -47,7 +49,23 @@ func wrapInBenchmarkLoop(fn *ast.FuncDecl)  {
 	}
 }
 
-func (v *FunctionVisitor) Visit(node ast.Node) (w ast.Visitor) {
+func searchTMethods(expr ast.Expr) bool {
+	call, ok := expr.(*ast.CallExpr)
+    if !ok {
+        return false
+    }
+    sel, ok := call.Fun.(*ast.SelectorExpr)
+    if !ok {
+        return false
+    }
+    ident, ok := sel.X.(*ast.Ident)
+    if !ok {
+        return false
+    }
+    return ident.Name == funcTestParamName && tOnlyMethods[sel.Sel.Name]
+}
+
+func (v *FunctionSignatureVisitor) Visit(node ast.Node) (w ast.Visitor) {
 	if node == nil {
 		return nil
 	}
@@ -76,18 +94,13 @@ func (v *FunctionVisitor) Visit(node ast.Node) (w ast.Visitor) {
 		}
 
 		/* check the function name; if TestXxx make it Benchmark else change the */
-		if strings.HasPrefix(decl.Name.Name, BENCHMARK_FUNCTION_PREFIX) {
+		if strings.HasPrefix(decl.Name.Name, TESTING_FUNCTION_PREFIX) {
 			decl.Name.Name = strings.ReplaceAll(decl.Name.Name, TESTING_FUNCTION_PREFIX, BENCHMARK_FUNCTION_PREFIX)
 		} else {
+			tParamFuncs[decl.Name.Name] = true
 			decl.Name.Name = BENCHMARK_FUNCTION_PREFIX + decl.Name.Name
 		}
-		
-		/* walk the body of the function */
-		bodyVisitor := &BodyVisitor{}
-		ast.Walk(bodyVisitor, decl.Body)
 
-		/* wrap the function body in b.Loop */
-		wrapInBenchmarkLoop(decl)
 		filteredDecls = append(filteredDecls, decl)
 	/* include the import declaration */
 	case *ast.GenDecl:
@@ -101,6 +114,82 @@ func (v *FunctionVisitor) Visit(node ast.Node) (w ast.Visitor) {
 	return nil
 }
 
+func (v *FunctionVisitor) Visit(node ast.Node) (w ast.Visitor) {
+	if node == nil {
+		return nil
+	}
+
+	fn, ok := node.(*ast.FuncDecl)
+	if !ok || fn.Name.Name == NOOP_FUNCTION_NAME {
+		return nil
+	}
+
+	/* walk the body of the function */
+	bodyVisitor := &BodyVisitor{}
+	ast.Walk(bodyVisitor, fn.Body)
+
+	/* wrap the function body in b.Loop */
+	wrapInBenchmarkLoop(fn)
+	return nil
+}
+
 func (v *BodyVisitor) Visit(node ast.Node) (w ast.Visitor) {
+	if node == nil {
+		return nil
+	}
+
+	switch s := node.(type) {
+	/* stmt */
+	case *ast.IfStmt, *ast.ForStmt, *ast.RangeStmt, *ast.SwitchStmt, *ast.SelectStmt, *ast.TypeSwitchStmt:
+		return v
+	case *ast.CaseClause, *ast.CommClause:
+		return v
+	case *ast.BlockStmt, *ast.GoStmt, *ast.DeferStmt:
+		return v
+	case *ast.AssignStmt:
+		// TODO: remove t.Deadline()
+		return v
+	case *ast.ExprStmt:
+		if searchTMethods(s.X) {
+			s.X = &ast.CallExpr{
+				Fun: ast.NewIdent(NOOP_FUNCTION_NAME),
+				Args: nil,
+			}
+		} else {
+			return v
+		}
+	/* expr */
+	case *ast.CallExpr:
+		switch fn := s.Fun.(type) {
+		case *ast.FuncLit:
+			for _, field := range fn.Type.Params.List {
+				star, ok := field.Type.(*ast.StarExpr)
+				if !ok {
+					continue
+				}
+				sel, ok := star.X.(*ast.SelectorExpr)
+				if !ok {
+					continue
+				}
+				pkg, ok := sel.X.(*ast.Ident)
+				if !ok {
+					continue
+				}
+				if pkg.Name == "testing" && sel.Sel.Name == "T" {
+					sel.Sel.Name = "B"
+				}
+			}
+			ast.Walk(v, fn.Body)
+		case *ast.Ident:
+			if tParamFuncs[fn.Name] {
+				fn.Name = BENCHMARK_FUNCTION_PREFIX + fn.Name
+			}
+		}
+		return nil
+	/* ignore other nodes */
+	default:
+		return nil
+	}
+
 	return nil
 }

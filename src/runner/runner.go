@@ -7,30 +7,38 @@ import (
 	"path/filepath"
 )
 
-func RunBecnhmarkTests(projDir string) {
+/* 
+   execute the go test benchmark command for a directory and flush the
+   results in a log file
+*/
+func RunBecnhmarkTests(projDir string, logFile string) {
 	info, err := os.Stat(projDir)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "cannot stat %s: %v\n", projDir, err)
-		os.Exit(1)
+		panic(fmt.Errorf("cannot stat %s: %v\n", projDir, err))
 	}
 	if !info.IsDir() {
-		fmt.Fprintf(os.Stderr, "%s is not a directory\n", projDir)
-		os.Exit(1)
+		panic(fmt.Errorf("%s is not a directory\n", projDir))
 	}
 
 	absDir, err := filepath.Abs(projDir)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "cannot resolve absolute path: %v\n", err)
-		os.Exit(1)
+		panic(fmt.Errorf("cannot resolve absolute path: %v\n", err))
 	}
 
+	/* open the log file */
+	lfile, err := os.Create(logFile)
+	if err != nil {
+		panic(fmt.Errorf("cannot create log file: %v\n", err))
+	}
+	defer lfile.Close()
+
+	/* execute the go test command */
 	cmd := exec.Command("go", "test", "-v", "-bench=.", "-benchmem", "-run=^$", "./...")
 	cmd.Dir = absDir
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	cmd.Stdout = lfile
+	cmd.Stderr = lfile
 
 	if err := cmd.Run(); err != nil {
-		fmt.Fprintf(os.Stderr, "benchmark failed: %v\n", err)
-		os.Exit(1)
+		panic(fmt.Errorf("benchmark failed: %v\n", err))
 	}
 }

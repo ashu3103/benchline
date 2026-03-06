@@ -25,13 +25,13 @@ var excludedDirs = map[string]bool{
 	".vscode":      true,
 }
 
-func FindTestFiles(root string) ([]string, error) {
+func FindTestFiles(root string) []string {
 	info, err := os.Stat(root)
 	if err != nil {
-		return nil, fmt.Errorf("cannot stat path %s: %w", root, err)
+		panic(fmt.Errorf("cannot stat path %s: %w", root, err))
 	}
 	if !info.IsDir() {
-		return nil, fmt.Errorf("%s is not a directory", root)
+		panic(fmt.Errorf("%s is not a directory", root))
 	}
 
 	var testFiles []string
@@ -56,8 +56,8 @@ func FindTestFiles(root string) ([]string, error) {
 	})
 
 	if err != nil {
-		return nil, fmt.Errorf("error walking directory %s: %w", root, err)
+		panic(fmt.Errorf("error walking directory %s: %w", root, err))
 	}
 
-	return testFiles, nil
+	return testFiles
 }

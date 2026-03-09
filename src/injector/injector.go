@@ -10,7 +10,6 @@ import (
 	"log"
 	"os"
 	"path/filepath"
-	// "slices"
 	"syscall"
 
 	"golang.org/x/tools/imports"

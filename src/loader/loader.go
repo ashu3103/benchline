@@ -5,6 +5,7 @@ import (
 	"go/ast"
 	"go/token"
 	"go/types"
+	"io"
 	"path/filepath"
 	"strings"
 
@@ -96,6 +97,57 @@ func LoadPackages(cfg *LoadConfig) ([]*LoadedPackage, error) {
 	}
 
 	return loaded, nil
+}
+
+// Dump the loaded packages
+func DumpLoadedPackages(w io.Writer, loaded []*LoadedPackage) {
+	if len(loaded) == 0 {
+		fmt.Fprintf(w, "no package loaded")
+	}
+
+	for _, lp := range loaded {
+		fmt.Fprintf(w, "package %s (%s)\n", lp.Pkg.PkgPath, lp.Pkg.Name)
+
+		if len(lp.SelectedFuncs) == 0 {
+			fmt.Fprintf(w, "  no selected functions")
+			continue
+		}
+
+		for i, fn := range lp.SelectedFuncs {
+			pos := lp.Fset.Position(fn.Pos())
+			filename := pos.Filename
+			if rel := trimDirPrefix(filename, lp.Pkg); rel != "" {
+				filename = rel
+			}
+			fmt.Fprintf(
+				w, "  [%d] %-30s %s:%d\n",
+				i + 1, fn.Name.Name, filename, pos.Line,
+			)
+		}
+	}
+
+}
+
+func trimDirPrefix(filename string, pkg interface{ String() string }) string {
+	// Use the last two path components: dir/file.go — enough to be unambiguous
+	// without requiring os.Getwd or module root resolution.
+	sep := '/'
+	// Find second-to-last separator.
+	idx := -1
+	count := 0
+	for i := len(filename) - 1; i >= 0; i-- {
+		if rune(filename[i]) == sep {
+			count++
+			if count == 2 {
+				idx = i
+				break
+			}
+		}
+	}
+	if idx >= 0 {
+		return filename[idx+1:]
+	}
+	return ""
 }
 
 // inDir reports whether the file containing pos is rooted under dirAbs.

@@ -59,18 +59,21 @@ func checkPermissions(file string) error {
 }
 
 func transformFile(node *ast.File) error {
-	/* setup */
-	filteredDecls = nil
 	/* clear any comments in benchmarks */
 	node.Comments = nil
 
-	funcSigVisitor := &FunctionSignatureVisitor{}
+	fileVisitor := &FileVisitor{}
 	for _, decl := range node.Decls {
-		ast.Walk(funcSigVisitor, decl)
+		ast.Walk(fileVisitor, decl)
 	}
 
 	/* replace the decls in the node */
-	node.Decls = filteredDecls
+	node.Decls = fileVisitor.IDecls
+
+	for _, fdecl := range fileVisitor.FDecls {
+		node.Decls = append(node.Decls, fdecl)
+	}
+
 	node.Decls = append(node.Decls, &ast.FuncDecl{
 		Name: ast.NewIdent(NOOP_FUNCTION_NAME),
 		Type: &ast.FuncType{
@@ -84,7 +87,15 @@ func transformFile(node *ast.File) error {
 
 	funcVisitor := &FunctionVisitor{}
 	for _, decl := range node.Decls {
-		ast.Walk(funcVisitor, decl)
+		fn, ok := decl.(*ast.FuncDecl)
+		if ok && fn.Name.Name != NOOP_FUNCTION_NAME {
+			ast.Walk(funcVisitor, fn)
+			if funcVisitor.Err != nil {
+				return funcVisitor.Err
+			}
+			/* wrap the function body in b.Loop */
+			wrapInBenchmarkLoop(fn)
+		}
 	}
 
 	return nil

@@ -12,34 +12,38 @@ var (
 		"Parallel": true,
 		"Deadline": true,
 	}
-	filteredDecls []ast.Decl
-	tParamFuncs = map[string]bool{}
+	tParamFuncs = map[string]string{}
 )
 
-type FunctionSignatureVisitor struct {}
-type FunctionVisitor struct {}
+type FileVisitor struct {
+	Err    error
+	FDecls []*ast.FuncDecl
+	IDecls []ast.Decl
+}
+
+type FunctionVisitor struct {
+	Err    error
+}
 type BodyVisitor struct {}
 
 func wrapInBenchmarkLoop(fn *ast.FuncDecl)  {
 	methodName := "Loop"
 
-	bLoopExpr := &ast.CallExpr{
-		Args: nil,
-		Fun: &ast.SelectorExpr{
-			X: &ast.Ident{
-				Name: funcTestParamName,
-				Obj: nil,
-			},
-			Sel: &ast.Ident{
-				Name: methodName,
-				Obj: nil,
-			},
-		},
-	}
-
 	forStmt := &ast.ForStmt{
 		Init: nil,
-		Cond: bLoopExpr,
+		Cond: &ast.CallExpr{
+		Args: nil,
+		Fun: &ast.SelectorExpr{
+				X: &ast.Ident{
+					Name: funcTestParamName,
+					Obj: nil,
+				},
+				Sel: &ast.Ident{
+					Name: methodName,
+					Obj: nil,
+				},
+			},
+		},
 		Post: nil,
 		Body: fn.Body,
 	}
@@ -65,87 +69,61 @@ func searchTMethods(expr ast.Expr) bool {
     return ident.Name == funcTestParamName && tOnlyMethods[sel.Sel.Name]
 }
 
-func (v *FunctionSignatureVisitor) Visit(node ast.Node) (w ast.Visitor) {
-	if node == nil {
+func checkAndModifyParamList(paramList []*ast.Field) bool {
+	for _, param := range paramList {
+		if starExp, ok := param.Type.(*ast.StarExpr); ok {
+			if selExp, ok := starExp.X.(*ast.SelectorExpr); ok {
+				pkg, ok := selExp.X.(*ast.Ident);
+				if ok && pkg.Name == "testing" && selExp.Sel.Name == "T" {
+					selExp.Sel.Name = "B"
+					funcTestParamName = param.Names[0].Name
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+func (v *FileVisitor) Visit(node ast.Node) (w ast.Visitor) {
+	if node == nil || v.Err != nil {
 		return nil
 	}
 
 	switch decl := node.(type) {
 	/* include the function declaration nodes that have *testing.T in their parameter list */
 	case *ast.FuncDecl:
-		hasTestingParam := false
-
 		/* check the parameter list of the function */
-		for _, param := range decl.Type.Params.List {
-			if starExp, ok := param.Type.(*ast.StarExpr); ok {
-				if selExp, ok := starExp.X.(*ast.SelectorExpr); ok {
-					pkg, ok := selExp.X.(*ast.Ident);
-					if ok && pkg.Name == "testing" && selExp.Sel.Name == "T" {
-						selExp.Sel.Name = "B"
-						funcTestParamName = param.Names[0].Name
-						hasTestingParam = true
-					}
-				}
-			}
-		}
-
-		if !hasTestingParam {
+		if !checkAndModifyParamList(decl.Type.Params.List) {
 			return nil
 		}
 
 		/* check the function name; if TestXxx make it Benchmark else change the */
 		if strings.HasPrefix(decl.Name.Name, TESTING_FUNCTION_PREFIX) {
 			decl.Name.Name = strings.ReplaceAll(decl.Name.Name, TESTING_FUNCTION_PREFIX, BENCHMARK_FUNCTION_PREFIX)
+			v.FDecls = append(v.FDecls, decl)
 		} else {
-			tParamFuncs[decl.Name.Name] = true
+			tParamFuncs[decl.Name.Name] = BENCHMARK_FUNCTION_PREFIX + decl.Name.Name
 			decl.Name.Name = BENCHMARK_FUNCTION_PREFIX + decl.Name.Name
+			v.FDecls = append([]*ast.FuncDecl{decl}, v.FDecls...)
 		}
-
-		filteredDecls = append(filteredDecls, decl)
 	/* include the import declaration */
 	case *ast.GenDecl:
 		if decl.Tok == token.IMPORT {
-			filteredDecls = append(filteredDecls, decl)
+			v.IDecls = append(v.IDecls, decl)
 		}
-	default:
-		// logs
 	}
 
 	return nil
 }
 
 func (v *FunctionVisitor) Visit(node ast.Node) (w ast.Visitor) {
-	if node == nil {
-		return nil
-	}
-
-	fn, ok := node.(*ast.FuncDecl)
-	if !ok || fn.Name.Name == NOOP_FUNCTION_NAME {
-		return nil
-	}
-
-	/* walk the body of the function */
-	bodyVisitor := &BodyVisitor{}
-	ast.Walk(bodyVisitor, fn.Body)
-
-	/* wrap the function body in b.Loop */
-	wrapInBenchmarkLoop(fn)
-	return nil
-}
-
-func (v *BodyVisitor) Visit(node ast.Node) (w ast.Visitor) {
-	if node == nil {
+	if node == nil || v.Err != nil {
 		return nil
 	}
 
 	switch s := node.(type) {
 	/* stmt */
-	case *ast.IfStmt, *ast.ForStmt, *ast.RangeStmt, *ast.SwitchStmt, *ast.SelectStmt, *ast.TypeSwitchStmt:
-		return v
-	case *ast.CaseClause, *ast.CommClause:
-		return v
-	case *ast.BlockStmt, *ast.GoStmt, *ast.DeferStmt:
-		return v
 	case *ast.AssignStmt:
 		// TODO: remove t.Deadline()
 		return v
@@ -155,8 +133,7 @@ func (v *BodyVisitor) Visit(node ast.Node) (w ast.Visitor) {
 				Fun: ast.NewIdent(NOOP_FUNCTION_NAME),
 				Args: nil,
 			}
-		} else {
-			return v
+			return nil
 		}
 	/* expr */
 	case *ast.CallExpr:
@@ -181,15 +158,12 @@ func (v *BodyVisitor) Visit(node ast.Node) (w ast.Visitor) {
 			}
 			ast.Walk(v, fn.Body)
 		case *ast.Ident:
-			if tParamFuncs[fn.Name] {
-				fn.Name = BENCHMARK_FUNCTION_PREFIX + fn.Name
+			if value, exists := tParamFuncs[fn.Name]; exists {
+				fn.Name = value
 			}
 		}
 		return nil
-	/* ignore other nodes */
-	default:
-		return nil
 	}
 
-	return nil
+	return v
 }

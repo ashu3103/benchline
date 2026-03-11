@@ -60,9 +60,9 @@ func checkPermissions(file string) error {
 
 func transformFile(node *ast.File) error {
 	/* setup */
-	clear(filteredDecls)
+	filteredDecls = nil
 	/* clear any comments in benchmarks */
-	clear(node.Comments)
+	node.Comments = nil
 
 	funcSigVisitor := &FunctionSignatureVisitor{}
 	for _, decl := range node.Decls {

@@ -27,7 +27,7 @@ type LoadedPackage struct {
 	Fset     *token.FileSet
 	Info     *types.Info
 	TypesPkg *types.Package
-	SelectedFuncs []*ast.FuncDecl
+	// SelectedFuncs []*ast.FuncDecl
 }
 
 type globalIndex struct {
@@ -39,10 +39,10 @@ type globalIndex struct {
 // LoadPackages loads Go packages using go/packages and returns them ready for analysis.
 // It requires the packages to be loadable with full type information.
 func LoadPackages(cfg *LoadConfig) ([]*LoadedPackage, error) {
-	dirAbs, err := filepath.Abs(cfg.Dir)
-	if err != nil {
-		return nil, fmt.Errorf("resolving dir: %w", err)
-	}
+	// dirAbs, err := filepath.Abs(cfg.Dir)
+	// if err != nil {
+	// 	return nil, fmt.Errorf("resolving dir: %w", err)
+	// }
 
 	pkgCfg := &packages.Config{
 		Mode: packages.NeedName |
@@ -63,9 +63,11 @@ func LoadPackages(cfg *LoadConfig) ([]*LoadedPackage, error) {
 		return nil, fmt.Errorf("packages.Load: %w", err)
 	}
 
-	idx := buildGlobalIndex(pkgs, dirAbs)
+	// idx := buildGlobalIndex(pkgs, dirAbs)
 
 	var loaded []*LoadedPackage
+	visited := make(map[string]int, 0)
+
 	for _, pkg := range pkgs {
 		if len(pkg.Errors) > 0 {
 			// Report but don't abort — partial results are useful.
@@ -77,23 +79,58 @@ func LoadPackages(cfg *LoadConfig) ([]*LoadedPackage, error) {
 			continue
 		}
 
-		entryPoints := collectEntryPoints(pkg, cfg)
-		if len(entryPoints) == 0 {
+		// Skip external test packages e.g. "add_test [add.test]"
+		if strings.Contains(pkg.ID, "_test [") {
+			continue
+		}
+		// Skip test binary e.g. "add.test"
+		if strings.HasSuffix(pkg.ID, ".test") && !strings.Contains(pkg.ID, "[") {
 			continue
 		}
 
-		selected := expandCallees(entryPoints, pkg, idx)
-		if len(selected) == 0 {
-			continue
+		// entryPoints := collectEntryPoints(pkg, cfg)
+		// if len(entryPoints) == 0 {
+		// 	continue
+		// }
+
+		// selected := expandCallees(entryPoints, pkg, idx)
+		// if len(selected) == 0 {
+		// 	continue
+		// }
+
+		// Normalize ID — "add [add.test]" → "add"
+		baseID := pkg.ID
+		if idx := strings.Index(baseID, " ["); idx != -1 {
+			baseID = baseID[:idx]
 		}
 
-		loaded = append(loaded, &LoadedPackage{
-			Pkg:           pkg,
-			Fset:          pkg.Fset,
-			Info:          pkg.TypesInfo,
-			TypesPkg:      pkg.Types,
-			SelectedFuncs: selected,
-		})
+		_, exists := visited[baseID]
+
+		if !exists {
+			loaded = append(loaded, &LoadedPackage{
+				Pkg:           pkg,
+				Fset:          pkg.Fset,
+				Info:          pkg.TypesInfo,
+				TypesPkg:      pkg.Types,
+				// SelectedFuncs: selected,
+			})
+			visited[baseID] = len(loaded) - 1
+		} else if strings.Contains(pkg.ID, "[") {
+			loaded[visited[baseID]] = &LoadedPackage{
+				Pkg:           pkg,
+				Fset:          pkg.Fset,
+				Info:          pkg.TypesInfo,
+				TypesPkg:      pkg.Types,
+			}
+		}
+		// if strings.Contains(pkg.ID, "[") {
+		// 	existing.Pkg  = pkg
+		// 	existing.Info = pkg.TypesInfo
+		// } else if  {
+		// 	// plain variant — only set if we haven't seen augmented yet
+		// 	existing.Pkg  = pkg
+		// 	existing.Info = pkg.TypesInfo
+		// }
 	}
 
 	return loaded, nil
@@ -108,22 +145,22 @@ func DumpLoadedPackages(w io.Writer, loaded []*LoadedPackage) {
 	for _, lp := range loaded {
 		fmt.Fprintf(w, "package %s (%s)\n", lp.Pkg.PkgPath, lp.Pkg.Name)
 
-		if len(lp.SelectedFuncs) == 0 {
-			fmt.Fprintf(w, "  no selected functions")
-			continue
-		}
+		// if len(lp.SelectedFuncs) == 0 {
+		// 	fmt.Fprintf(w, "  no selected functions")
+		// 	continue
+		// }
 
-		for i, fn := range lp.SelectedFuncs {
-			pos := lp.Fset.Position(fn.Pos())
-			filename := pos.Filename
-			if rel := trimDirPrefix(filename, lp.Pkg); rel != "" {
-				filename = rel
-			}
-			fmt.Fprintf(
-				w, "  [%d] %-30s %s:%d\n",
-				i + 1, fn.Name.Name, filename, pos.Line,
-			)
-		}
+		// for i, fn := range lp.SelectedFuncs {
+		// 	pos := lp.Fset.Position(fn.Pos())
+		// 	filename := pos.Filename
+		// 	if rel := trimDirPrefix(filename, lp.Pkg); rel != "" {
+		// 		filename = rel
+		// 	}
+		// 	fmt.Fprintf(
+		// 		w, "  [%d] %-30s %s:%d\n",
+		// 		i + 1, fn.Name.Name, filename, pos.Line,
+		// 	)
+		// }
 	}
 
 }

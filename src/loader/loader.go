@@ -27,7 +27,7 @@ type LoadedPackage struct {
 	Fset     *token.FileSet
 	Info     *types.Info
 	TypesPkg *types.Package
-	// SelectedFuncs []*ast.FuncDecl
+	SelectedFuncs []*ast.FuncDecl
 }
 
 type globalIndex struct {
@@ -39,10 +39,10 @@ type globalIndex struct {
 // LoadPackages loads Go packages using go/packages and returns them ready for analysis.
 // It requires the packages to be loadable with full type information.
 func LoadPackages(cfg *LoadConfig) ([]*LoadedPackage, error) {
-	// dirAbs, err := filepath.Abs(cfg.Dir)
-	// if err != nil {
-	// 	return nil, fmt.Errorf("resolving dir: %w", err)
-	// }
+	dirAbs, err := filepath.Abs(cfg.Dir)
+	if err != nil {
+		return nil, fmt.Errorf("resolving dir: %w", err)
+	}
 
 	pkgCfg := &packages.Config{
 		Mode: packages.NeedName |
@@ -63,7 +63,7 @@ func LoadPackages(cfg *LoadConfig) ([]*LoadedPackage, error) {
 		return nil, fmt.Errorf("packages.Load: %w", err)
 	}
 
-	// idx := buildGlobalIndex(pkgs, dirAbs)
+	idx := buildGlobalIndex(pkgs, dirAbs)
 
 	var loaded []*LoadedPackage
 	visited := make(map[string]int, 0)
@@ -88,16 +88,6 @@ func LoadPackages(cfg *LoadConfig) ([]*LoadedPackage, error) {
 			continue
 		}
 
-		// entryPoints := collectEntryPoints(pkg, cfg)
-		// if len(entryPoints) == 0 {
-		// 	continue
-		// }
-
-		// selected := expandCallees(entryPoints, pkg, idx)
-		// if len(selected) == 0 {
-		// 	continue
-		// }
-
 		// Normalize ID — "add [add.test]" → "add"
 		baseID := pkg.ID
 		if idx := strings.Index(baseID, " ["); idx != -1 {
@@ -106,13 +96,23 @@ func LoadPackages(cfg *LoadConfig) ([]*LoadedPackage, error) {
 
 		_, exists := visited[baseID]
 
+		entryPoints := collectEntryPoints(pkg, cfg)
+		if len(entryPoints) == 0 {
+			continue
+		}
+
+		selected := expandCallees(entryPoints, pkg, idx)
+		if len(selected) == 0 {
+			continue
+		}
+
 		if !exists {
 			loaded = append(loaded, &LoadedPackage{
 				Pkg:           pkg,
 				Fset:          pkg.Fset,
 				Info:          pkg.TypesInfo,
 				TypesPkg:      pkg.Types,
-				// SelectedFuncs: selected,
+				SelectedFuncs: selected,
 			})
 			visited[baseID] = len(loaded) - 1
 		} else if strings.Contains(pkg.ID, "[") {
@@ -121,16 +121,9 @@ func LoadPackages(cfg *LoadConfig) ([]*LoadedPackage, error) {
 				Fset:          pkg.Fset,
 				Info:          pkg.TypesInfo,
 				TypesPkg:      pkg.Types,
+				SelectedFuncs: selected,
 			}
 		}
-		// if strings.Contains(pkg.ID, "[") {
-		// 	existing.Pkg  = pkg
-		// 	existing.Info = pkg.TypesInfo
-		// } else if  {
-		// 	// plain variant — only set if we haven't seen augmented yet
-		// 	existing.Pkg  = pkg
-		// 	existing.Info = pkg.TypesInfo
-		// }
 	}
 
 	return loaded, nil
@@ -145,22 +138,22 @@ func DumpLoadedPackages(w io.Writer, loaded []*LoadedPackage) {
 	for _, lp := range loaded {
 		fmt.Fprintf(w, "package %s (%s)\n", lp.Pkg.PkgPath, lp.Pkg.Name)
 
-		// if len(lp.SelectedFuncs) == 0 {
-		// 	fmt.Fprintf(w, "  no selected functions")
-		// 	continue
-		// }
+		if len(lp.SelectedFuncs) == 0 {
+			fmt.Fprintf(w, "  no selected functions")
+			continue
+		}
 
-		// for i, fn := range lp.SelectedFuncs {
-		// 	pos := lp.Fset.Position(fn.Pos())
-		// 	filename := pos.Filename
-		// 	if rel := trimDirPrefix(filename, lp.Pkg); rel != "" {
-		// 		filename = rel
-		// 	}
-		// 	fmt.Fprintf(
-		// 		w, "  [%d] %-30s %s:%d\n",
-		// 		i + 1, fn.Name.Name, filename, pos.Line,
-		// 	)
-		// }
+		for i, fn := range lp.SelectedFuncs {
+			pos := lp.Fset.Position(fn.Pos())
+			filename := pos.Filename
+			if rel := trimDirPrefix(filename, lp.Pkg); rel != "" {
+				filename = rel
+			}
+			fmt.Fprintf(
+				w, "  [%d] %-30s %s:%d\n",
+				i + 1, fn.Name.Name, filename, pos.Line,
+			)
+		}
 	}
 
 }
@@ -298,17 +291,14 @@ func expandCallees(
 		obj, ok := entryPkg.TypesInfo.Defs[fn.Name]
 		if !ok || obj == nil {
 			// Still include the entry point itself even if we can't resolve it.
-			result = append(result, fn)
 			continue
 		}
 		tfn, ok := obj.(*types.Func)
 		if !ok {
-			result = append(result, fn)
 			continue
 		}
 		if !visited[tfn] {
 			visited[tfn] = true
-			result = append(result, fn)
 			queue = append(queue, queueItem{fn, entryPkg})
 		}
 	}

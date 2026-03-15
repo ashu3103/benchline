@@ -212,7 +212,7 @@ func collectEntryPoints(pkg *packages.Package, cfg *LoadConfig) []*ast.FuncDecl 
 				continue
 			}
 			name := fn.Name.Name
-			if cfg.BenchmarkOnly && !strings.HasPrefix(name, "Benchmark") {
+			if cfg.BenchmarkOnly && !(strings.HasPrefix(name, "Benchmark") || strings.HasPrefix(name, "Test")) {
 				continue
 			}
 			entries = append(entries, fn)

@@ -2,6 +2,7 @@ package parser
 
 import (
 	"bufio"
+	"os"
 	"fmt"
 	"io"
 	"sort"
@@ -30,6 +31,25 @@ func FilterEscapedVariables(items []EscapeInfo, lo, hi int) []EscapeInfo {
     })
 
 	return items[left:right]
+}
+
+// ParseEscapesFromString parses the output of `go test -gcflags="-m"` from
+// an in-memory string.
+func ParseEscapesFromString(output string) PkgFileEscapeMap {
+	return parseEscapes(strings.NewReader(output))
+}
+ 
+// ParseEscapesFromFile parses the output of `go test -gcflags="-m"` from a
+// file, reading it in chunks of bufSize bytes at a time. Lines that span a
+// chunk boundary are carried over so no diagnostic is lost.
+func ParseEscapesFromFile(path string, bufSize int) (PkgFileEscapeMap, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+ 
+	return parseEscapes(NewChunkedReader(f, bufSize)), nil
 }
 
 // add item to PkgFileInfoMap

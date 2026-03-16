@@ -156,28 +156,98 @@ func parseEscapeLine(line string) (string, EscapeInfo, error) {
 }
 
 func DumpEscapeMap(w io.Writer, escapeMap PkgFileEscapeMap) {
-	if escapeMap == nil {
-		fmt.Fprintf(w, "no package found\n")
-	}
+    if escapeMap == nil {
+        fmt.Fprintf(w, "no packages found\n")
+        return
+    }
 
-	for k, v := range escapeMap {
-		fmt.Fprintf(w, "package %s\n", k)
+    pkgs := sortedKeys(escapeMap)
 
-		if v == nil {
-			fmt.Fprintf(w, "  no escape variables found\n")
-			continue
+    for pi, pkg := range pkgs {
+        // Package header
+        files := escapeMap[pkg]
+
+        total := 0
+		for _, infos := range files {
+			total += len(infos)
 		}
 
-		for _, kv := range v {
-			for _, info := range kv {
-				fmt.Fprintf(w, "  %s:%d:%d  %s\n", info.Filename, info.Line, info.Col, info.VarName)
-			}
-		}
+        fmt.Fprintf(w, "┌─ package %s  (%d escape(s))\n", pkg, total)
 
-		fmt.Fprintf(w, "--------------\n")
-	}
+        if files == nil {
+            fmt.Fprintf(w, "│   no escaped variables found\n")
+        } else {
+            // Pre-compute the widest "file:line:col" in this package
+            // so every variable name starts at the same column.
+            maxLocLen := 0
+            for file, infos := range files {
+                for _, info := range infos {
+					loc := fmt.Sprintf("%s:%d:%d", file, info.Line, info.Col)
+                    if l := len(loc); l > maxLocLen {
+                        maxLocLen = l
+                    }
+                }
+            }
+
+            fileNames := sortedKeys(files)
+            for i, file := range fileNames {
+				hasNextFile := false
+                infos := files[file]
+
+				if i == len(fileNames) - 1 {
+					hasNextFile = false
+					fmt.Fprintf(w, "│   └ %s  (%d escape(s))\n", file, len(infos))
+				} else {
+					hasNextFile = true
+					fmt.Fprintf(w, "│   ├ %s  (%d escape(s))\n", file, len(infos))
+				}
+
+                for j, info := range infos {
+                    loc := fmt.Sprintf("%s:%d:%d", file, info.Line, info.Col)
+                    connector := "├"
+                    if j == len(infos)-1 {
+                        connector = "└"
+                    }
+					if !hasNextFile {
+						fmt.Fprintf(w, "│      %s [%*d]  %-*s  →  \"%s\"\n",
+							connector,
+							len(fmt.Sprint(len(infos))), j+1, // index width matches total digits
+							maxLocLen, loc,
+							info.VarName,
+						)
+					} else {
+						fmt.Fprintf(w, "│   │  %s [%*d]  %-*s  →  %s\n",
+							connector,
+							len(fmt.Sprint(len(infos))), j+1, // index width matches total digits
+							maxLocLen, loc,
+							info.VarName,
+						)
+					}
+                }
+            }
+        }
+
+        // Separator between packages
+        if pi < len(pkgs)-1 {
+            fmt.Fprintf(w, "│\n")
+        }
+		fmt.Fprintf(w, "└───────\n")
+    }
 }
 
+// sortedKeys returns the keys of any map[string]V in sorted order.
+func sortedKeys[V any](m map[string]V) []string {
+    keys := make([]string, 0, len(m))
+    for k := range m {
+        keys = append(keys, k)
+    }
+    sort.Strings(keys)
+    return keys
+}
+
+// isLiteralEscape reports whether a variable field from a `-gcflags="-m"`
+// diagnostic represents a literal, anonymous allocation, or transient
+// expression rather than a named variable, and should be filtered out.
 func isLiteralEscape(v string) bool {
 	if v == "" {
 		return false

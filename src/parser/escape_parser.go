@@ -73,12 +73,20 @@ func parseEscapes(r io.Reader) PkgFileEscapeMap {
 		switch {
 		case strings.HasPrefix(line, "# "):
 			currentPkg = parsePackageHeader(line)
+
+			// ignore test executables
+			if strings.HasSuffix(currentPkg, ".test") {
+				currentPkg = ""
+			}
 		case currentPkg != "" && strings.Contains(line, "escapes to heap"):
 			file, info, err := parseEscapeLine(line)
 			if err != nil {
 				// TODO: log error
 				continue
 			}
+
+			// filter any literal escaping
+			
 
 			result.add(currentPkg, file, info)
 		}
@@ -138,4 +146,27 @@ func parseEscapeLine(line string) (string, EscapeInfo, error) {
 		VarName: strings.TrimSpace(varName),
 		Filename: locParts[0],
 	}, nil
+}
+
+func DumpEscapeMap(w io.Writer, escapeMap PkgFileEscapeMap) {
+	if escapeMap == nil {
+		fmt.Fprintf(w, "no package found\n")
+	}
+
+	for k, v := range escapeMap {
+		fmt.Fprintf(w, "package %s\n", k)
+
+		if v == nil {
+			fmt.Fprintf(w, "  no escape variables found\n")
+			continue
+		}
+
+		for _, kv := range v {
+			for _, info := range kv {
+				fmt.Fprintf(w, "  %s:%d:%d  %s\n", info.Filename, info.Line, info.Col, info.VarName)
+			}
+		}
+
+		fmt.Fprintf(w, "--------------\n")
+	}
 }

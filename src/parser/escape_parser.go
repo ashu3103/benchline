@@ -78,15 +78,12 @@ func parseEscapes(r io.Reader) PkgFileEscapeMap {
 			if strings.HasSuffix(currentPkg, ".test") {
 				currentPkg = ""
 			}
-		case currentPkg != "" && strings.Contains(line, "escapes to heap"):
+		case currentPkg != "" && (strings.Contains(line, "escapes to heap") || strings.Contains(line, "moved to heap:")):
 			file, info, err := parseEscapeLine(line)
-			if err != nil {
+			if err != nil || isLiteralEscape(info.VarName) {
 				// TODO: log error
 				continue
 			}
-
-			// filter any literal escaping
-			
 
 			result.add(currentPkg, file, info)
 		}
@@ -125,25 +122,35 @@ func parseEscapeLine(line string) (string, EscapeInfo, error) {
 		return "", EscapeInfo{}, fmt.Errorf("location: \"%s\" is not of the form <file>:<line>:<col>", location)
 	}
  
-	varName, _, found := strings.Cut(message, " escapes to heap")
-	if !found {
-		return "", EscapeInfo{}, fmt.Errorf("\"escapes to heap\" not found in message: %s", message)
-	}
+	var varName string
+    switch {
+    case strings.Contains(message, " escapes to heap"):
+        varName, _, _ = strings.Cut(message, " escapes to heap")
+    case strings.HasPrefix(message, "moved to heap: "):
+        _, varName, _ = strings.Cut(message, "moved to heap: ")
+    default:
+        return "", EscapeInfo{}, nil
+    }
+
+	varName = strings.TrimSpace(varName)
+    if varName == "" {
+        return "", EscapeInfo{}, nil
+    }
 
 	l, err := strconv.Atoi(locParts[1])
 	if err != nil {
 		return "", EscapeInfo{}, fmt.Errorf("parsed line number: %s is not an integer", locParts[1])
 	}
 
-	c, err := strconv.Atoi(locParts[1])
+	c, err := strconv.Atoi(locParts[2])
 	if err != nil {
-		return "", EscapeInfo{}, fmt.Errorf("parsed line number: %s is not an integer", locParts[2])
+		return "", EscapeInfo{}, fmt.Errorf("parsed column number: %s is not an integer", locParts[2])
 	}
 
 	return locParts[0], EscapeInfo{
 		Line:     l,
 		Col:      c,
-		VarName: strings.TrimSpace(varName),
+		VarName: varName,
 		Filename: locParts[0],
 	}, nil
 }
@@ -169,4 +176,41 @@ func DumpEscapeMap(w io.Writer, escapeMap PkgFileEscapeMap) {
 
 		fmt.Fprintf(w, "--------------\n")
 	}
+}
+
+func isLiteralEscape(v string) bool {
+	if v == "" {
+		return false
+	}
+
+	switch v[0] {
+	case '"', '`', '\'': // string or rune literal
+		return true
+	case '&': // address-of:  &x, &T{}
+		return true
+	case '.': // variadic:  ... argument
+		return true
+	case '(': // type conversion:  (T)(expr)
+		return true
+	case '~': // compiler-generated temporary:  ~r0, ~r1
+		return true
+	}
+ 
+	// Composite literals end with "{" in the compiler's output.
+	if strings.HasSuffix(v, "{") {
+		return true
+	}
+ 
+	// Explicit keyword forms.
+	for _, prefix := range []string{
+		"new(",          // new(T)
+		"make(",         // make([]T, n), make(chan T), make(map[K]V)
+		"func literal",  // anonymous function value
+	} {
+		if strings.HasPrefix(v, prefix) {
+			return true
+		}
+	}
+
+	return false
 }

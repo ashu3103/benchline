@@ -131,31 +131,52 @@ func LoadPackages(cfg *LoadConfig) ([]*LoadedPackage, error) {
 
 // Dump the loaded packages
 func DumpLoadedPackages(w io.Writer, loaded []*LoadedPackage) {
-	if len(loaded) == 0 {
-		fmt.Fprintf(w, "no package loaded")
-	}
+    if len(loaded) == 0 {
+        fmt.Fprintf(w, "no packages loaded\n")
+        return
+    }
 
-	for _, lp := range loaded {
-		fmt.Fprintf(w, "package %s (%s)\n", lp.Pkg.PkgPath, lp.Pkg.Name)
+    for pi, lp := range loaded {
+        // Package header
+        fmt.Fprintf(w, "┌─ package %s  (%s)  (%d function(s))\n",
+            lp.Pkg.PkgPath, lp.Pkg.Name, len(lp.SelectedFuncs))
 
-		if len(lp.SelectedFuncs) == 0 {
-			fmt.Fprintf(w, "  no selected functions")
-			continue
-		}
+        if len(lp.SelectedFuncs) == 0 {
+            fmt.Fprintf(w, "│   no selected functions\n")
+        } else {
+            // Pre-compute widest function name for alignment.
+            maxNameLen := 0
+            for _, fn := range lp.SelectedFuncs {
+                if l := len(fn.Name.Name); l > maxNameLen {
+                    maxNameLen = l
+                }
+            }
 
-		for i, fn := range lp.SelectedFuncs {
-			pos := lp.Fset.Position(fn.Pos())
-			filename := pos.Filename
-			if rel := trimDirPrefix(filename, lp.Pkg); rel != "" {
-				filename = rel
-			}
-			fmt.Fprintf(
-				w, "  [%d] %-30s %s:%d\n",
-				i + 1, fn.Name.Name, filename, pos.Line,
-			)
-		}
-	}
+            for i, fn := range lp.SelectedFuncs {
+                pos := lp.Fset.Position(fn.Pos())
+                filename := pos.Filename
+                if rel := trimDirPrefix(filename, lp.Pkg); rel != "" {
+                    filename = rel
+                }
 
+                connector := "├"
+                if i == len(lp.SelectedFuncs)-1 {
+                    connector = "└"
+                }
+                fmt.Fprintf(w, "│   %s [%*d]  %-*s  →  %s:%d\n",
+                    connector,
+                    len(fmt.Sprint(len(lp.SelectedFuncs))), i+1,
+                    maxNameLen, fn.Name.Name,
+                    filename, pos.Line,
+                )
+            }
+        }
+
+        if pi < len(loaded)-1 {
+            fmt.Fprintf(w, "│\n")
+        }
+        fmt.Fprintf(w, "└───────\n")
+    }
 }
 
 func trimDirPrefix(filename string, pkg interface{ String() string }) string {

@@ -96,23 +96,12 @@ func LoadPackages(cfg *LoadConfig) ([]*LoadedPackage, error) {
 
 		_, exists := visited[baseID]
 
-		entryPoints := collectEntryPoints(pkg, cfg)
-		if len(entryPoints) == 0 {
-			continue
-		}
-
-		selected := expandCallees(entryPoints, pkg, idx)
-		if len(selected) == 0 {
-			continue
-		}
-
 		if !exists {
 			loaded = append(loaded, &LoadedPackage{
 				Pkg:           pkg,
 				Fset:          pkg.Fset,
 				Info:          pkg.TypesInfo,
 				TypesPkg:      pkg.Types,
-				SelectedFuncs: selected,
 			})
 			visited[baseID] = len(loaded) - 1
 		} else if strings.Contains(pkg.ID, "[") {
@@ -121,7 +110,32 @@ func LoadPackages(cfg *LoadConfig) ([]*LoadedPackage, error) {
 				Fset:          pkg.Fset,
 				Info:          pkg.TypesInfo,
 				TypesPkg:      pkg.Types,
-				SelectedFuncs: selected,
+			}
+		}
+	}
+
+	selectedFunc := make(map[*types.Func]bool)
+	// populate selected functions
+	for _, pkg := range loaded {
+		entryPoints := collectEntryPoints(pkg.Pkg, cfg)
+		if len(entryPoints) == 0 {
+			continue
+		}
+
+		selected := expandCallees(entryPoints, pkg.Pkg, idx)
+		if len(selected) == 0 {
+			continue
+		}
+
+		for _, sel := range selected {
+			selectedFunc[sel] = true
+		}
+	}
+
+	for _, pkg := range loaded {
+		for k, v := range selectedFunc {
+			if v && idx.pkg[k] == pkg.Pkg {
+				pkg.SelectedFuncs = append(pkg.SelectedFuncs, idx.decl[k])
 			}
 		}
 	}
@@ -293,11 +307,11 @@ func expandCallees(
 	entryPoints []*ast.FuncDecl,
 	entryPkg *packages.Package,
 	idx *globalIndex,
-) []*ast.FuncDecl {
+) []*types.Func {
 	// visited tracks types.Func pointers we have already enqueued.
 	visited := make(map[*types.Func]bool)
 	// result is the ordered output slice (entry points first).
-	var result []*ast.FuncDecl
+	var result []*types.Func
 
 	// queue items pair a declaration with the TypesInfo of the package that
 	// owns it — needed to resolve call expressions inside that declaration.
@@ -370,7 +384,7 @@ func expandCallees(
 			}
 
 			visited[tfn] = true
-			result = append(result, calleeDecl)
+			result = append(result, tfn)
 			queue = append(queue, queueItem{calleeDecl, calleePkg})
 			return true
 		})

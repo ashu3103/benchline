@@ -23,12 +23,14 @@ type VarUseChain struct {
 type DefUseChain struct {
 	Chains     map[types.Object]*VarUseChain
 	Info       *types.Info
+	Fset       *token.FileSet
 	StmtStack  []ast.Stmt
 }
 
-func NewDefUseChain(info *types.Info) *DefUseChain {
+func NewDefUseChain(info *types.Info, fset *token.FileSet) *DefUseChain {
 	return &DefUseChain{
 		Info:      info,
+		Fset:      fset,
 		Chains:    make(map[types.Object]*VarUseChain),
 	}
 }
@@ -36,6 +38,21 @@ func NewDefUseChain(info *types.Info) *DefUseChain {
 type FunctionBodyVisitor struct {
 	*DefUseChain
 	Pushed  bool
+}
+
+func NewFunctionBodyVisitor(defUseChain *DefUseChain) *FunctionBodyVisitor {
+	return &FunctionBodyVisitor{
+		DefUseChain: defUseChain,
+		Pushed: false,
+	}
+}
+
+func CreateDefUseChains(node *ast.FuncDecl, info *types.Info, fset *token.FileSet) *DefUseChain {
+	defUseChain := NewDefUseChain(info, fset)
+	funcBodyVis := NewFunctionBodyVisitor(defUseChain)
+	fmt.Println("slected function name: ", node.Name.Name)
+	ast.Walk(funcBodyVis, node)
+	return funcBodyVis.DefUseChain
 }
 
 func (v *FunctionBodyVisitor) Visit(n ast.Node) (w ast.Visitor) {
@@ -95,32 +112,32 @@ func DumpDefUseChain(w io.Writer, du *DefUseChain) {
 		chain := du.Chains[obj]
 
 		// Variable header
-		// pos := obj.Pos()
+		pos := obj.Pos()
 		fmt.Fprintf(w, "│\n")
 		if duInd == (totalChains - 1) {
-			fmt.Fprintf(w, "│   └ %-*s  %s  (declared at %s)\n",
+			fmt.Fprintf(w, "│   └ \"%-*s\"  {%s}  (declared at %s)\n",
 				maxNameLen, obj.Name(),
-				obj.Type().String(),
-				du.Info.Types[chain.Id].Type, // resolves via types.Info
+				formatType(obj.Type()),
+				formatPos(du.Fset.Position(pos)),
 			)
 		} else {
-			fmt.Fprintf(w, "│   ├ %-*s  %s  (declared at %s)\n",
+			fmt.Fprintf(w, "│   ├ %-*s  {%s}  (declared at %s)\n",
 				maxNameLen, obj.Name(),
-				obj.Type().String(),
-				du.Info.Types[chain.Id].Type, // resolves via types.Info
+				formatType(obj.Type()),
+				formatPos(du.Fset.Position(pos)),
 			)
 		}
 
 		// Use sites.
 		if len(chain.Uses) == 0 {
-			fmt.Fprintf(w, "│   └ no uses\n")
+			fmt.Fprintf(w, "│      └ no uses\n")
 		} else {
 			for i, use := range chain.Uses {
 				connector := "├"
 				if i == len(chain.Uses)-1 {
 					connector = "└"
 				}
-				fmt.Fprintf(w, "│   %s [%*d]  use  →  %s\n",
+				fmt.Fprintf(w, "│      %s [%*d]  use  →  %s\n",
 					connector,
 					len(fmt.Sprint(len(chain.Uses))), i+1,
 					formatStmt(use),
@@ -156,15 +173,42 @@ func formatStmt(stmt ast.Stmt) string {
 	return line
 }
 
+func formatType(objType types.Type) string {
+	var result string
+
+	typ := objType.String()
+	underlyingType := objType.Underlying().String()
+
+	s := strings.Split(typ, ".")
+	if len(s) >= 2 {
+		typ = s[1]
+
+	}
+
+	if (typ != underlyingType) {
+		result = result + fmt.Sprintf("%s (%s)", typ, underlyingType)
+	} else {
+		result = result + typ
+	}
+
+	return result
+}
+
+func formatPos(pos token.Position) string {
+	p := pos.String()
+	s := strings.Split(p, "/")
+	
+	return s[len(s) - 1]
+}
+
 // collect definition site of a struct variable
 func (v *FunctionBodyVisitor) collectStructDef(node ast.Stmt) {
 	switch n := node.(type) {
 	case *ast.AssignStmt:
-		if n.Tok != token.ASSIGN { return }  // token must be :=
+		if n.Tok != token.DEFINE { return }  // token must be :=
 		for _, lhs := range n.Lhs {
 			l, ok := lhs.(*ast.Ident)
 			if !ok { continue }
-
 			obj := v.Info.Defs[l]
 			if obj == nil { continue }
 
@@ -184,7 +228,7 @@ func (v *FunctionBodyVisitor) collectStructDef(node ast.Stmt) {
         vs, ok := spec.(*ast.ValueSpec)
         if !ok { continue }
         for _, name := range vs.Names {
-            obj := v.Info.Defs[name]
+			obj := v.Info.Defs[name]
             if obj == nil { continue }
             if isStructType(obj.Type()) {
                 v.Chains[obj] = &VarUseChain{

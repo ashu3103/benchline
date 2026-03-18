@@ -21,21 +21,21 @@ type VarUseChain struct {
 }
 
 type DefUseChain struct {
-	chains     map[types.Object]*VarUseChain
-	info       types.Info
-	stmtStack  []ast.Stmt
+	Chains     map[types.Object]*VarUseChain
+	Info       *types.Info
+	StmtStack  []ast.Stmt
 }
 
-func NewDefUseChain(info types.Info) *DefUseChain {
+func NewDefUseChain(info *types.Info) *DefUseChain {
 	return &DefUseChain{
-		info:      info,
-		chains:    make(map[types.Object]*VarUseChain),
+		Info:      info,
+		Chains:    make(map[types.Object]*VarUseChain),
 	}
 }
 
 type FunctionBodyVisitor struct {
 	*DefUseChain
-	pushed  bool
+	Pushed  bool
 }
 
 func (v *FunctionBodyVisitor) Visit(n ast.Node) (w ast.Visitor) {
@@ -46,22 +46,22 @@ func (v *FunctionBodyVisitor) Visit(n ast.Node) (w ast.Visitor) {
 	switch node := n.(type) {
 	/* ---- handle definitions ---- */
 	case *ast.AssignStmt:
-		v.stmtStack = append(v.stmtStack, node)
-		v.pushed = true
+		v.StmtStack = append(v.StmtStack, node)
+		v.Pushed = true
 		v.collectStructDef(node)
 	case *ast.DeclStmt:
-		v.stmtStack = append(v.stmtStack, node)
-		v.pushed = true
+		v.StmtStack = append(v.StmtStack, node)
+		v.Pushed = true
 		v.collectStructDef(node)
 	
 	/* ---- handle uses ---- */
 	case *ast.DeferStmt, *ast.ExprStmt, *ast.LabeledStmt, *ast.IncDecStmt,
 			*ast.SendStmt, *ast.ReturnStmt:
-		v.stmtStack = append(v.stmtStack, node.(ast.Stmt))
+		v.StmtStack = append(v.StmtStack, node.(ast.Stmt))
 	case *ast.Ident:
-		obj := v.info.Uses[node]
+		obj := v.Info.Uses[node]
 		if obj == nil { return nil }
-		if chain, tracked := v.chains[obj]; tracked {
+		if chain, tracked := v.Chains[obj]; tracked {
 			if stmt := v.currentLeaf(); stmt != nil {
 				chain.Uses = appendUniq(chain.Uses, stmt)
 			}
@@ -73,16 +73,16 @@ func (v *FunctionBodyVisitor) Visit(n ast.Node) (w ast.Visitor) {
 }
 
 func DumpDefUseChain(w io.Writer, du *DefUseChain) {
-	if du == nil || len(du.chains) == 0 {
+	if du == nil || len(du.Chains) == 0 {
 		fmt.Fprintf(w, "no def-use chains found\n")
 		return
 	}
 
-	totalChains := len(du.chains)
+	totalChains := len(du.Chains)
 
 	// Pre-compute widest variable name for alignment.
 	maxNameLen := 0
-	for obj := range du.chains {
+	for obj := range du.Chains {
 		if l := len(obj.Name()); l > maxNameLen {
 			maxNameLen = l
 		}
@@ -91,8 +91,8 @@ func DumpDefUseChain(w io.Writer, du *DefUseChain) {
 	fmt.Fprintf(w, "┌─ def-use chains  (%d variable(s))\n", totalChains)
 
 	duInd := 0
-	for obj := range du.chains {
-		chain := du.chains[obj]
+	for obj := range du.Chains {
+		chain := du.Chains[obj]
 
 		// Variable header
 		// pos := obj.Pos()
@@ -101,13 +101,13 @@ func DumpDefUseChain(w io.Writer, du *DefUseChain) {
 			fmt.Fprintf(w, "│   └ %-*s  %s  (declared at %s)\n",
 				maxNameLen, obj.Name(),
 				obj.Type().String(),
-				du.info.Types[chain.Id].Type, // resolves via types.Info
+				du.Info.Types[chain.Id].Type, // resolves via types.Info
 			)
 		} else {
 			fmt.Fprintf(w, "│   ├ %-*s  %s  (declared at %s)\n",
 				maxNameLen, obj.Name(),
 				obj.Type().String(),
-				du.info.Types[chain.Id].Type, // resolves via types.Info
+				du.Info.Types[chain.Id].Type, // resolves via types.Info
 			)
 		}
 
@@ -165,11 +165,11 @@ func (v *FunctionBodyVisitor) collectStructDef(node ast.Stmt) {
 			l, ok := lhs.(*ast.Ident)
 			if !ok { continue }
 
-			obj := v.info.Defs[l]
+			obj := v.Info.Defs[l]
 			if obj == nil { continue }
 
 			if isStructType(obj.Type()) {
-				v.chains[obj] = &VarUseChain{
+				v.Chains[obj] = &VarUseChain{
 					Obj: obj,
 					Decl: v.currentLeaf(),
 					Id: l,
@@ -184,10 +184,10 @@ func (v *FunctionBodyVisitor) collectStructDef(node ast.Stmt) {
         vs, ok := spec.(*ast.ValueSpec)
         if !ok { continue }
         for _, name := range vs.Names {
-            obj := v.info.Defs[name]
+            obj := v.Info.Defs[name]
             if obj == nil { continue }
             if isStructType(obj.Type()) {
-                v.chains[obj] = &VarUseChain{
+                v.Chains[obj] = &VarUseChain{
 					Obj: obj,
 					Decl: v.currentLeaf(),
 					Id: name,
@@ -203,8 +203,8 @@ func (v *FunctionBodyVisitor) collectStructDef(node ast.Stmt) {
 
 // return the top of the stack
 func (v *FunctionBodyVisitor) currentLeaf() ast.Stmt {
-	if len(v.stmtStack) == 0 { return nil }
-	return v.stmtStack[len(v.stmtStack) - 1]
+	if len(v.StmtStack) == 0 { return nil }
+	return v.StmtStack[len(v.StmtStack) - 1]
 }
 
 // check if the type is of an aggregate

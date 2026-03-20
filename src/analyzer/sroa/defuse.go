@@ -1,15 +1,17 @@
 package analyzer
 
 import (
+	"bytes"
 	"fmt"
 	"go/ast"
+	"go/format"
 	"go/token"
 	"go/types"
 	"io"
-	"bytes"
-	"strings"
-	"go/format"
 	"slices"
+	"strings"
+
+	p "github/ashu3103/benchline/src/parser"
 )
 
 // struct to store uses of a variable
@@ -21,18 +23,48 @@ type VarUseChain struct {
 }
 
 type DefUseChain struct {
-	Chains     map[types.Object]*VarUseChain
-	Info       *types.Info
-	Fset       *token.FileSet
-	StmtStack  []ast.Stmt
+	FuncDecl    *ast.FuncDecl
+	Chains      map[types.Object]*VarUseChain
+	Info        *types.Info
+	Fset        *token.FileSet
+	EscapedVars []p.EscapeInfo
+	Escaped     bool
+	StmtStack   []ast.Stmt
 }
 
-func NewDefUseChain(info *types.Info, fset *token.FileSet) *DefUseChain {
+func NewDefUseChain(node *ast.FuncDecl, info *types.Info, fset *token.FileSet, ev []p.EscapeInfo) *DefUseChain {
 	return &DefUseChain{
-		Info:      info,
-		Fset:      fset,
-		Chains:    make(map[types.Object]*VarUseChain),
+		FuncDecl:    node,
+		Info:        info,
+		Fset:        fset,
+		EscapedVars: ev,
+		Chains:      make(map[types.Object]*VarUseChain),
 	}
+}
+
+func (du *DefUseChain) isEscaped(id *ast.Ident) bool {
+	startLine := du.Fset.Position(du.FuncDecl.Body.Lbrace).Line
+	endLine   := du.Fset.Position(du.FuncDecl.Body.Rbrace).Line
+	evs := p.FilterEscapedVariables(du.EscapedVars, startLine, endLine)
+
+	for _, ev := range evs {
+		if du.varMatch(id, ev) {
+			du.Escaped = true
+			return true
+		}
+	}
+	return false
+}
+
+func (du *DefUseChain) varMatch(id *ast.Ident, ev p.EscapeInfo) bool {
+	line := du.Fset.Position(id.Pos()).Line
+	col  := du.Fset.Position(id.Pos()).Column
+
+	if id.Name == ev.VarName && line == ev.Line && ev.Col == col {
+		return true 
+	}
+
+	return false
 }
 
 type FunctionBodyVisitor struct {
@@ -47,16 +79,20 @@ func NewFunctionBodyVisitor(defUseChain *DefUseChain) *FunctionBodyVisitor {
 	}
 }
 
-func CreateDefUseChains(node *ast.FuncDecl, info *types.Info, fset *token.FileSet) *DefUseChain {
-	defUseChain := NewDefUseChain(info, fset)
+func CreateDefUseChains(node *ast.FuncDecl, info *types.Info, fset *token.FileSet, ev []p.EscapeInfo) *DefUseChain {
+	defUseChain := NewDefUseChain(node, info, fset, ev)
 	funcBodyVis := NewFunctionBodyVisitor(defUseChain)
-	fmt.Println("slected function name: ", node.Name.Name)
 	ast.Walk(funcBodyVis, node)
+
+	if funcBodyVis.Escaped {
+		return nil
+	}
+
 	return funcBodyVis.DefUseChain
 }
 
 func (v *FunctionBodyVisitor) Visit(n ast.Node) (w ast.Visitor) {
-	if n == nil {
+	if n == nil || v.Escaped {
 		return nil
 	}
 
@@ -78,6 +114,11 @@ func (v *FunctionBodyVisitor) Visit(n ast.Node) (w ast.Visitor) {
 	case *ast.Ident:
 		obj := v.Info.Uses[node]
 		if obj == nil { return nil }
+
+		if v.isEscaped(node) {
+			v.Escaped = true
+		}
+
 		if chain, tracked := v.Chains[obj]; tracked {
 			if stmt := v.currentLeaf(); stmt != nil {
 				chain.Uses = appendUniq(chain.Uses, stmt)
@@ -113,7 +154,6 @@ func DumpDefUseChain(w io.Writer, du *DefUseChain) {
 
 		// Variable header
 		pos := obj.Pos()
-		fmt.Fprintf(w, "│\n")
 		if duInd == (totalChains - 1) {
 			fmt.Fprintf(w, "│   └ \"%-*s\"  {%s}  (declared at %s)\n",
 				maxNameLen, obj.Name(),
@@ -177,7 +217,6 @@ func formatType(objType types.Type) string {
 	var result string
 
 	typ := objType.String()
-	underlyingType := objType.Underlying().String()
 
 	s := strings.Split(typ, ".")
 	if len(s) >= 2 {
@@ -185,11 +224,7 @@ func formatType(objType types.Type) string {
 
 	}
 
-	if (typ != underlyingType) {
-		result = result + fmt.Sprintf("%s (%s)", typ, underlyingType)
-	} else {
-		result = result + typ
-	}
+	result = result + typ
 
 	return result
 }
@@ -212,6 +247,11 @@ func (v *FunctionBodyVisitor) collectStructDef(node ast.Stmt) {
 			obj := v.Info.Defs[l]
 			if obj == nil { continue }
 
+			if v.isEscaped(l) {
+				v.Escaped = true
+				return
+			}
+
 			if isStructType(obj.Type()) {
 				v.Chains[obj] = &VarUseChain{
 					Obj: obj,
@@ -230,6 +270,12 @@ func (v *FunctionBodyVisitor) collectStructDef(node ast.Stmt) {
         for _, name := range vs.Names {
 			obj := v.Info.Defs[name]
             if obj == nil { continue }
+
+			if v.isEscaped(name) {
+				v.Escaped = true
+				return
+			}
+
             if isStructType(obj.Type()) {
                 v.Chains[obj] = &VarUseChain{
 					Obj: obj,

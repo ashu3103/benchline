@@ -21,13 +21,34 @@ type LoadConfig struct {
 	BuildFlags []string
 }
 
+func CanonicalPkgName(pkg string) string {
+    // "add_test [add.test]" → "add"
+    if idx := strings.Index(pkg, "_test ["); idx != -1 {
+        return pkg[:idx]
+    }
+    // "add [add.test]" → "add"
+    if idx := strings.Index(pkg, " ["); idx != -1 {
+        return pkg[:idx]
+    }
+    // "add.test" → "add"
+    if strings.HasSuffix(pkg, ".test") {
+        return pkg[:strings.LastIndex(pkg, ".")]
+    }
+    return pkg
+}
+
+type TargetFunc struct {
+	Decl     *ast.FuncDecl
+	FileName string
+}
+
 // LoadedPackage wraps a loaded package with the data needed for SROA analysis.
 type LoadedPackage struct {
-	Pkg      *packages.Package
-	Fset     *token.FileSet
-	Info     *types.Info
-	TypesPkg *types.Package
-	SelectedFuncs []*ast.FuncDecl
+	Pkg         *packages.Package
+	Fset        *token.FileSet
+	Info        *types.Info
+	TypesPkg    *types.Package
+	TargetFuncs []TargetFunc
 }
 
 type globalIndex struct {
@@ -89,10 +110,7 @@ func LoadPackages(cfg *LoadConfig) ([]*LoadedPackage, error) {
 		}
 
 		// Normalize ID — "add [add.test]" → "add"
-		baseID := pkg.ID
-		if idx := strings.Index(baseID, " ["); idx != -1 {
-			baseID = baseID[:idx]
-		}
+		baseID := CanonicalPkgName(pkg.ID)
 
 		_, exists := visited[baseID]
 
@@ -135,7 +153,10 @@ func LoadPackages(cfg *LoadConfig) ([]*LoadedPackage, error) {
 	for _, pkg := range loaded {
 		for k, v := range selectedFunc {
 			if v && idx.pkg[k] == pkg.Pkg {
-				pkg.SelectedFuncs = append(pkg.SelectedFuncs, idx.decl[k])
+				pkg.TargetFuncs = append(pkg.TargetFuncs, TargetFunc{
+					Decl: idx.decl[k],
+					FileName: pkg.Fset.Position(k.Pos()).Filename,
+				})
 			}
 		}
 	}
@@ -153,34 +174,34 @@ func DumpLoadedPackages(w io.Writer, loaded []*LoadedPackage) {
     for pi, lp := range loaded {
         // Package header
         fmt.Fprintf(w, "┌─ package %s  (%s)  (%d function(s))\n",
-            lp.Pkg.PkgPath, lp.Pkg.Name, len(lp.SelectedFuncs))
+            lp.Pkg.PkgPath, lp.Pkg.Name, len(lp.TargetFuncs))
 
-        if len(lp.SelectedFuncs) == 0 {
+        if len(lp.TargetFuncs) == 0 {
             fmt.Fprintf(w, "│   no selected functions\n")
         } else {
             // Pre-compute widest function name for alignment.
             maxNameLen := 0
-            for _, fn := range lp.SelectedFuncs {
-                if l := len(fn.Name.Name); l > maxNameLen {
+            for _, fn := range lp.TargetFuncs {
+                if l := len(fn.Decl.Name.Name); l > maxNameLen {
                     maxNameLen = l
                 }
             }
 
-            for i, fn := range lp.SelectedFuncs {
-                pos := lp.Fset.Position(fn.Pos())
+            for i, fn := range lp.TargetFuncs {
+                pos := lp.Fset.Position(fn.Decl.Pos())
                 filename := pos.Filename
                 if rel := trimDirPrefix(filename, lp.Pkg); rel != "" {
                     filename = rel
                 }
 
                 connector := "├"
-                if i == len(lp.SelectedFuncs)-1 {
+                if i == len(lp.TargetFuncs)-1 {
                     connector = "└"
                 }
                 fmt.Fprintf(w, "│   %s [%*d]  %-*s  →  %s:%d\n",
                     connector,
-                    len(fmt.Sprint(len(lp.SelectedFuncs))), i+1,
-                    maxNameLen, fn.Name.Name,
+                    len(fmt.Sprint(len(lp.TargetFuncs))), i+1,
+                    maxNameLen, fn.Decl.Name.Name,
                     filename, pos.Line,
                 )
             }

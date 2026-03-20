@@ -2,9 +2,9 @@ package parser
 
 import (
 	"bufio"
-	"os"
 	"fmt"
 	"io"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -80,8 +80,12 @@ func parseEscapes(r io.Reader) PkgFileEscapeMap {
 			}
 		case currentPkg != "" && (strings.Contains(line, "escapes to heap") || strings.Contains(line, "moved to heap:")):
 			file, info, err := parseEscapeLine(line)
-			if err != nil || isLiteralEscape(info.VarName) {
+			if err != nil || isLiteralEscape(info.VarName) || isFieldEscape(info.VarName) {
 				// TODO: log error
+				continue
+			}
+
+			if strings.HasSuffix(file, "_test.go") {
 				continue
 			}
 
@@ -216,7 +220,7 @@ func DumpEscapeMap(w io.Writer, escapeMap PkgFileEscapeMap) {
 							info.VarName,
 						)
 					} else {
-						fmt.Fprintf(w, "│   │  %s [%*d]  %-*s  →  %s\n",
+						fmt.Fprintf(w, "│   │  %s [%*d]  %-*s  →  \"%s\"\n",
 							connector,
 							len(fmt.Sprint(len(infos))), j+1, // index width matches total digits
 							maxLocLen, loc,
@@ -282,5 +286,10 @@ func isLiteralEscape(v string) bool {
 		}
 	}
 
+	return false
+}
+
+func isFieldEscape(v string) bool {
+	if strings.Contains(v, ".") { return true }
 	return false
 }

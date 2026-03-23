@@ -240,6 +240,10 @@ func (v *StmtVisitor) checkExpr(expr ast.Expr, ctx exprContext) exprContext {
 				}
 				return res
             } else {
+				if _, ok := sel.X.(*ast.Ident); ok {
+					return v.checkExpr(sel.X, ctxSafe)
+				}
+
                 // value receiver — chain broken
                 return v.checkExpr(sel.X, ctxMayViolate)
             }
@@ -251,7 +255,7 @@ func (v *StmtVisitor) checkExpr(expr ast.Expr, ctx exprContext) exprContext {
 			return v.checkExpr(e.X, ctx)
 		}
 
-		result := v.checkExpr(e, ctxViolate)
+		result := v.checkExpr(e.X, ctxViolate)
 		switch result {
 		case ctxViolate:
 			if v.reason == VERDICT_ANONYMOUS {
@@ -259,6 +263,8 @@ func (v *StmtVisitor) checkExpr(expr ast.Expr, ctx exprContext) exprContext {
 			}
 			return ctxViolate
 		}
+		return ctxSafe
+	case *ast.BasicLit:
 		return ctxSafe
 	case *ast.CompositeLit:
 		for _, elt := range e.Elts {

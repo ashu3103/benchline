@@ -245,7 +245,7 @@ func (v *FunctionBodyVisitor) collectStructDef(node ast.Stmt) {
 			l, ok := lhs.(*ast.Ident)
 			if !ok { continue }
 			obj := v.Info.Defs[l]
-			if obj == nil { continue }
+			if obj == nil || l.Name == "_" { continue }
 
 			if v.isEscaped(l) {
 				v.Escaped = true

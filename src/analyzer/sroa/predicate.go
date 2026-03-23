@@ -287,44 +287,6 @@ func (v *StmtVisitor) checkExpr(expr ast.Expr, ctx exprContext) exprContext {
 	return ctxViolate
 }
 
-func isChainRootedAt(expr ast.Expr, obj types.Object, info *types.Info) bool {
-	current := expr
-	for {
-		switch e := current.(type) {
-		case *ast.Ident:
-			return info.Uses[e] == obj
-
-		case *ast.SelectorExpr:
-			current = e.X
-
-		case *ast.IndexExpr:
-			current = e.X
-
-		case *ast.IndexListExpr:
-			current = e.X
-
-		case *ast.CallExpr:
-			sel, ok := e.Fun.(*ast.SelectorExpr)
-			if !ok {
-				return false
-			}
-			current = sel.X
-
-		case *ast.ParenExpr:
-			current = e.X
-
-		case *ast.StarExpr:
-			current = e.X
-
-		case *ast.TypeAssertExpr:
-			current = e.X
-
-		default:
-			return false
-		}
-	}
-}
-
 func DumpVerdicts(w io.Writer, verdicts []Verdict) {
 	if len(verdicts) == 0 {
 		fmt.Fprintf(w, "no verdicts found\n")
